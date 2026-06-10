@@ -4,6 +4,7 @@ import { integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
 export const businessPlans = sqliteTable("business_plans", {
   id: text("id").primaryKey(),
   title: text("title").notNull(),
+  teamName: text("team_name").notNull().default("Team"),
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
   updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 });

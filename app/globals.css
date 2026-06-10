@@ -40,6 +40,10 @@ body {
     display: none !important;
   }
 
+  .no-print {
+    display: none !important;
+  }
+
   .print-memo {
     display: block !important;
     font-family: Arial, Helvetica, sans-serif;

@@ -1,0 +1,1 @@
+ALTER TABLE `business_plans` ADD `team_name` text DEFAULT 'Team' NOT NULL;

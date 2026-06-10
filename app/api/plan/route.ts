@@ -106,6 +106,7 @@ async function ensureSeedData() {
   await db.insert(businessPlans).values({
     id: PLAN_ID,
     title: "2027 Business Plan",
+    teamName: "Team",
   });
 
   await db.insert(memoSections).values(
@@ -161,6 +162,17 @@ export async function POST(request: Request) {
     const db = getDb();
     const payload = (await request.json()) as Record<string, unknown>;
     const action = payload.action;
+
+    if (action === "save-plan") {
+      const teamName = String(payload.teamName ?? "").trim() || "Team";
+
+      await db
+        .update(businessPlans)
+        .set({ teamName, updatedAt: sql`CURRENT_TIMESTAMP` })
+        .where(eq(businessPlans.id, PLAN_ID));
+
+      return Response.json({ ok: true });
+    }
 
     if (action === "save-section") {
       const sectionId = String(payload.sectionId ?? "");

@@ -43,12 +43,6 @@ const roleLabels: Record<Role, string> = {
   approver: "Approver",
 };
 
-const roleDescriptions: Record<Role, string> = {
-  business: "Draft, pressure-test, and resolve section questions.",
-  enablement: "Review implications and ask focused questions.",
-  approver: "Assess readiness, ask questions, and record posture.",
-};
-
 const sectionCoach: Record<string, string[]> = {
   "executive-summary": [
     "What is this business trying to become in 2027?",
@@ -120,6 +114,7 @@ function roleAuthor(role: Role) {
 
 export default function Home() {
   const [role, setRole] = useState<Role>("business");
+  const [teamName, setTeamName] = useState("Team");
   const [sections, setSections] = useState<MemoSection[]>([]);
   const [comments, setComments] = useState<SectionComment[]>([]);
   const [approvals, setApprovals] = useState<Approval[]>([]);
@@ -129,6 +124,7 @@ export default function Home() {
   const [saving, setSaving] = useState(false);
   const [draftComment, setDraftComment] = useState("");
   const [visibility, setVisibility] = useState<Visibility>("Public");
+  const [howToOpen, setHowToOpen] = useState(false);
 
   const activeSection = sections.find((section) => section.id === activeSectionId) ?? sections[0];
   const activeComments = useMemo(
@@ -151,6 +147,7 @@ export default function Home() {
     totalOpenQuestions === 0
       ? "Ready for approval"
       : `${totalOpenQuestions} open question${totalOpenQuestions === 1 ? "" : "s"}`;
+  const planTitle = `2027 ${teamName || "Team"} Business Plan`;
 
   useEffect(() => {
     void loadWorkspace(role);
@@ -169,11 +166,25 @@ export default function Home() {
       throw new Error(payload.error ?? "Failed to load plan");
     }
 
+    setTeamName(payload.plan?.teamName || "Team");
     setSections(payload.sections);
     setComments(payload.comments);
     setApprovals(payload.approvals);
     setActiveSectionId((current) => current || payload.sections[0]?.id || "");
     setLoading(false);
+  }
+
+  async function savePlanName(nextTeamName = teamName) {
+    const cleanName = nextTeamName.trim() || "Team";
+    setTeamName(cleanName);
+    await fetch("/api/plan", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action: "save-plan",
+        teamName: cleanName,
+      }),
+    });
   }
 
   async function saveSection(section: MemoSection) {
@@ -267,10 +278,16 @@ export default function Home() {
       <div className="app-shell mx-auto max-w-7xl px-5 py-5 lg:px-8">
         <header className="mb-5 flex flex-col gap-4 border-b border-[#d8d6cf] pb-4 lg:flex-row lg:items-center lg:justify-between">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-wide text-[#5b665f]">
-              2027 Business Plan
-            </p>
-            <h1 className="mt-1 text-2xl font-semibold">Strategy Workspace</h1>
+            <h1 className="text-2xl font-semibold">{planTitle}</h1>
+            <label className="mt-3 block max-w-xs text-xs font-semibold uppercase tracking-wide text-[#68716b]">
+              Team name
+              <input
+                className="mt-1 w-full rounded-md border border-[#c9c6be] bg-white px-3 py-2 text-sm font-medium normal-case tracking-normal outline-none focus:border-[#1f5d3a]"
+                value={teamName}
+                onBlur={() => savePlanName()}
+                onChange={(event) => setTeamName(event.target.value)}
+              />
+            </label>
           </div>
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
             <div className="inline-grid grid-cols-3 rounded-lg border border-[#d0cec7] bg-white p-1 text-sm">
@@ -291,6 +308,12 @@ export default function Home() {
             </div>
             <button
               className="rounded-md border border-[#b9b6ae] bg-white px-3 py-2 text-sm font-semibold hover:bg-[#efede7]"
+              onClick={() => setHowToOpen(true)}
+            >
+              How to
+            </button>
+            <button
+              className="rounded-md border border-[#b9b6ae] bg-white px-3 py-2 text-sm font-semibold hover:bg-[#efede7]"
               onClick={exportPdf}
             >
               Export PDF
@@ -298,10 +321,7 @@ export default function Home() {
           </div>
         </header>
 
-        <section className="mb-5 grid gap-3 lg:grid-cols-[1fr_auto] lg:items-center">
-          <p className="max-w-2xl text-sm leading-6 text-[#556058]">
-            {roleDescriptions[role]}
-          </p>
+        <section className="mb-5 flex justify-end">
           <div className="grid grid-cols-3 gap-2 text-sm">
             <SummaryPill label="Approved" value={`${approvedSections}/${sections.length || 8}`} />
             <SummaryPill label="Questions" value={`${totalOpenQuestions} open`} />
@@ -437,7 +457,9 @@ export default function Home() {
         )}
       </div>
 
-      <PrintMemo sections={sections} readinessLabel={readinessLabel} />
+      {howToOpen ? <HowToModal onClose={() => setHowToOpen(false)} /> : null}
+
+      <PrintMemo title={planTitle} sections={sections} readinessLabel={readinessLabel} />
     </main>
   );
 }
@@ -652,18 +674,62 @@ function DrawerHeader({ title, onClose }: { title: string; onClose: () => void }
   );
 }
 
+function HowToModal({ onClose }: { onClose: () => void }) {
+  return (
+    <div className="no-print fixed inset-0 z-50 flex items-center justify-center bg-black/30 px-4 py-6">
+      <div className="w-full max-w-xl rounded-lg border border-[#d8d6cf] bg-white p-5 shadow-xl">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wide text-[#68716b]">
+              How to use
+            </p>
+            <h2 className="mt-1 text-xl font-semibold">Build the plan section by section</h2>
+          </div>
+          <button
+            className="rounded-md border border-[#c9c6be] px-3 py-1.5 text-sm font-semibold hover:bg-[#f2f1ec]"
+            onClick={onClose}
+          >
+            Close
+          </button>
+        </div>
+
+        <div className="mt-5 grid gap-3 text-sm leading-6 text-[#3f4842]">
+          <p>
+            <strong>Business Team:</strong> draft one section at a time, use Coach
+            for thinking prompts, then move sections from Draft to Review.
+          </p>
+          <p>
+            <strong>Enablement:</strong> review the memo and use Questions to add
+            section-level comments for Legal, HR, Marketing, Finance, or other groups.
+          </p>
+          <p>
+            <strong>Approver:</strong> review the same memo, ask questions, and set
+            approval posture when a section is ready.
+          </p>
+          <p>
+            <strong>Export PDF:</strong> creates a clean memo-only print view without
+            comments, controls, or internal workflow details.
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function PrintMemo({
+  title,
   sections,
   readinessLabel,
 }: {
+  title: string;
   sections: MemoSection[];
   readinessLabel: string;
 }) {
   return (
     <section className="print-memo hidden">
       <header>
-        <p>2027 Business Plan</p>
-        <h1>Business Strategy Memo</h1>
+        <p>Business Strategy Memo</p>
+        <h1>{title}</h1>
         <span>{readinessLabel}</span>
       </header>
       {sections.map((section) => (
