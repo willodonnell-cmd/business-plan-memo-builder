@@ -44,6 +44,11 @@ type Approval = {
   posture: ApprovalPosture;
 };
 
+type CoachMessage = {
+  role: "user" | "assistant";
+  content: string;
+};
+
 const roleLabels: Record<Role, string> = {
   business: "Business Team",
   enablement: "Enablement",
@@ -425,10 +430,6 @@ export default function Home() {
     window.print();
   }
 
-  const coachPrompt = activeSection
-    ? `Act as a business plan thinking coach for the 2027 Prologis business plan. Do not write the section. Do not invent facts. Ask concise questions that help the team improve the "${activeSection.title}" section for an Executive Committee approval memo.\n\nCurrent draft:\n${activeSection.content}`
-    : "";
-
   return (
     <main className="min-h-screen bg-[#f7f6f2] text-[#161b18]">
       <div className="app-shell mx-auto max-w-7xl px-5 py-5 lg:px-8">
@@ -666,7 +667,6 @@ export default function Home() {
       {coachOpen && activeSection ? (
         <CoachModal
           section={activeSection}
-          prompt={coachPrompt}
           onClose={() => setCoachOpen(false)}
         />
       ) : null}
@@ -928,20 +928,56 @@ function MemoReader({ section }: { section: MemoSection }) {
 
 function CoachModal({
   section,
-  prompt,
   onClose,
 }: {
   section: MemoSection;
-  prompt: string;
   onClose: () => void;
 }) {
   const [coachQuestion, setCoachQuestion] = useState("");
+  const [messages, setMessages] = useState<CoachMessage[]>([]);
+  const [coachLoading, setCoachLoading] = useState(false);
+  const [coachError, setCoachError] = useState("");
   const starterQuestions = coachStarters[section.id] ?? strategyChecks.slice(0, 3);
-  const finalPrompt = `${prompt}\n\nQuestions to pressure-test:\n${coachQuestion.trim() || "- Ask me the most important questions this section must answer."}`;
-  const chatGptUrl = `https://chatgpt.com/?q=${encodeURIComponent(finalPrompt)}`;
 
   function addQuestion(question: string) {
     setCoachQuestion(question);
+  }
+
+  async function askCoach() {
+    const question = coachQuestion.trim();
+    if (!question || coachLoading) return;
+
+    setCoachLoading(true);
+    setCoachError("");
+    setMessages((current) => [...current, { role: "user", content: question }]);
+    setCoachQuestion("");
+
+    try {
+      const response = await fetch("/api/coach", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sectionTitle: section.title,
+          draft: section.content,
+          question,
+        }),
+      });
+      const payload = await response.json();
+
+      if (!response.ok) {
+        throw new Error(payload.error || "GPT Coach failed to respond.");
+      }
+
+      setMessages((current) => [
+        ...current,
+        { role: "assistant", content: payload.text || "No response returned." },
+      ]);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "GPT Coach failed to respond.";
+      setCoachError(message);
+    } finally {
+      setCoachLoading(false);
+    }
   }
 
   return (
@@ -983,12 +1019,55 @@ function CoachModal({
           </div>
         </div>
 
+        <div className="mt-5 rounded-lg border border-[#d8d6cf] bg-[#fbfaf7] p-4">
+          <p className="text-xs font-semibold uppercase tracking-wide text-[#68716b]">
+            Coach response
+          </p>
+          <div className="mt-3 max-h-72 space-y-3 overflow-y-auto">
+            {messages.length === 0 ? (
+              <p className="text-sm leading-6 text-[#68716b]">
+                Choose a starter or ask your own question. GPT Coach will respond here.
+              </p>
+            ) : (
+              messages.map((message, index) => (
+                <div
+                  className={`rounded-md border p-3 text-sm leading-6 ${
+                    message.role === "assistant"
+                      ? "border-[#d8d6cf] bg-white"
+                      : "border-[#cfe0d1] bg-[#eef6ef]"
+                  }`}
+                  key={`${message.role}-${index}`}
+                >
+                  <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-[#68716b]">
+                    {message.role === "assistant" ? "GPT Coach" : "You"}
+                  </p>
+                  <p className="whitespace-pre-wrap">{message.content}</p>
+                </div>
+              ))
+            )}
+            {coachLoading ? (
+              <p className="text-sm text-[#68716b]">GPT Coach is thinking...</p>
+            ) : null}
+          </div>
+          {coachError ? (
+            <p className="mt-3 rounded-md border border-[#ead0c4] bg-[#fff5ef] p-3 text-sm leading-6 text-[#8a3d24]">
+              {coachError}
+            </p>
+          ) : null}
+        </div>
+
         <label className="mt-5 block text-sm font-semibold">
           Ask your own
           <textarea
             className="mt-2 min-h-28 w-full resize-y rounded-md border border-[#c9c6be] bg-[#fffefa] p-3 text-sm leading-6 outline-none focus:border-[#1f5d3a]"
             value={coachQuestion}
             onChange={(event) => setCoachQuestion(event.target.value)}
+            onKeyDown={(event) => {
+              if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
+                event.preventDefault();
+                void askCoach();
+              }
+            }}
             placeholder="Example: What would make this section clearer for an Executive Committee approval decision?"
           />
         </label>
@@ -996,18 +1075,17 @@ function CoachModal({
         <div className="mt-5 flex flex-col gap-2 sm:flex-row sm:justify-end">
           <button
             className="rounded-md border border-[#b9b6ae] px-3 py-2 text-sm font-semibold hover:bg-[#f2f1ec]"
-            onClick={() => navigator.clipboard.writeText(finalPrompt)}
+            onClick={() => setCoachQuestion("")}
           >
-            Copy for ChatGPT
+            Clear
           </button>
-          <a
-            className="rounded-md bg-[#1f5d3a] px-3 py-2 text-center text-sm font-semibold text-white hover:bg-[#17462c]"
-            href={chatGptUrl}
-            rel="noreferrer"
-            target="_blank"
+          <button
+            className="rounded-md bg-[#1f5d3a] px-3 py-2 text-sm font-semibold text-white hover:bg-[#17462c] disabled:cursor-not-allowed disabled:opacity-50"
+            disabled={coachLoading || !coachQuestion.trim()}
+            onClick={() => void askCoach()}
           >
-            Open ChatGPT
-          </a>
+            {coachLoading ? "Asking..." : "Ask GPT"}
+          </button>
         </div>
       </div>
     </div>
