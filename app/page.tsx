@@ -934,6 +934,8 @@ function CoachModal({
   onClose: () => void;
 }) {
   const [coachQuestion, setCoachQuestion] = useState("");
+  const [coachContext, setCoachContext] = useState("");
+  const [contextFileName, setContextFileName] = useState("");
   const [messages, setMessages] = useState<CoachMessage[]>([]);
   const [coachLoading, setCoachLoading] = useState(false);
   const [coachError, setCoachError] = useState("");
@@ -960,6 +962,7 @@ function CoachModal({
           sectionTitle: section.title,
           draft: section.content,
           question,
+          context: coachContext,
         }),
       });
       const payload = await response.json();
@@ -978,6 +981,17 @@ function CoachModal({
     } finally {
       setCoachLoading(false);
     }
+  }
+
+  function loadContextFile(file: File | undefined) {
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      setCoachContext(String(reader.result ?? "").slice(0, 12000));
+      setContextFileName(file.name);
+    };
+    reader.readAsText(file);
   }
 
   return (
@@ -1054,6 +1068,35 @@ function CoachModal({
               {coachError}
             </p>
           ) : null}
+        </div>
+
+        <div className="mt-5 rounded-lg border border-[#d8d6cf] bg-white p-4">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p className="text-sm font-semibold">Reference context</p>
+              {contextFileName ? (
+                <p className="mt-1 text-xs text-[#68716b]">{contextFileName}</p>
+              ) : null}
+            </div>
+            <label className="inline-flex cursor-pointer items-center justify-center rounded-md border border-[#b9b6ae] px-3 py-2 text-sm font-semibold hover:bg-[#f2f1ec]">
+              Add file
+              <input
+                accept=".txt,.md,.csv,.rtf"
+                className="sr-only"
+                type="file"
+                onChange={(event) => loadContextFile(event.target.files?.[0])}
+              />
+            </label>
+          </div>
+          <textarea
+            className="mt-3 min-h-24 w-full resize-y rounded-md border border-[#c9c6be] bg-[#fffefa] p-3 text-sm leading-6 outline-none focus:border-[#1f5d3a]"
+            value={coachContext}
+            onChange={(event) => {
+              setCoachContext(event.target.value.slice(0, 12000));
+              setContextFileName("");
+            }}
+            placeholder="Paste relevant excerpts from a prior business plan or presentation."
+          />
         </div>
 
         <label className="mt-5 block text-sm font-semibold">

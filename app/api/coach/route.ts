@@ -4,6 +4,7 @@ type CoachPayload = {
   sectionTitle?: unknown;
   draft?: unknown;
   question?: unknown;
+  context?: unknown;
 };
 
 function getOutputText(payload: any) {
@@ -33,6 +34,7 @@ export async function POST(request: Request) {
   const sectionTitle = String(payload.sectionTitle ?? "").trim();
   const draft = String(payload.draft ?? "").trim();
   const question = String(payload.question ?? "").trim();
+  const context = String(payload.context ?? "").trim().slice(0, 12000);
 
   if (!sectionTitle || !question) {
     return Response.json(
@@ -51,7 +53,7 @@ export async function POST(request: Request) {
       model: env.OPENAI_MODEL || "gpt-5.5",
       instructions:
         "You are GPT Coach for a Prologis 2027 business plan memo. Do not write the memo for the user. Do not invent facts. Ask useful follow-up questions, identify gaps, and suggest ways to sharpen the team's thinking. Keep the response concise and executive-oriented.",
-      input: `Section: ${sectionTitle}\n\nCurrent draft:\n${draft || "(No draft yet.)"}\n\nUser question:\n${question}`,
+      input: `Section: ${sectionTitle}\n\nCurrent draft:\n${draft || "(No draft yet.)"}\n\nReference context from prior plans or presentations:\n${context || "(No additional context provided.)"}\n\nUser question:\n${question}`,
       max_output_tokens: 450,
     }),
   });
