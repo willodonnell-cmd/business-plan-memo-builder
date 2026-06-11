@@ -19,6 +19,12 @@ type MemoSection = {
   status: SectionStatus;
 };
 
+type SectionGuidance = {
+  intent: string;
+  answer: string[];
+  format: string[];
+};
+
 type SectionComment = {
   id: string;
   sectionId: string;
@@ -95,6 +101,92 @@ const sectionCoach: Record<string, string[]> = {
   ],
 };
 
+const sectionGuidance: Record<string, SectionGuidance> = {
+  "executive-summary": {
+    intent: "Summarize what the business is trying to become in 2027, why it matters to Prologis, and the core business thesis.",
+    answer: [
+      "What is this business trying to become in 2027?",
+      "Why does it matter to Prologis?",
+      "What is the core business thesis?",
+      "What are the 3-5 most important takeaways from the plan?",
+    ],
+    format: ["1 paragraph, 4-6 sentences maximum", "3-5 bullets"],
+  },
+  priorities: {
+    intent: "Force prioritization by naming only the priorities that are critical to business success in 2027.",
+    answer: [
+      "What is the priority?",
+      "Why is it a priority in 2027?",
+      "What decision or action does it require?",
+      "What is the expected outcome if we execute well?",
+    ],
+    format: ["Maximum of 3 priorities", "For each priority: priority name and 2-3 bullets"],
+  },
+  growth: {
+    intent: "Describe the growth opportunities that could meaningfully impact the business over the next several years.",
+    answer: [
+      "What is the opportunity?",
+      "How large could the opportunity become?",
+      "What customer need does it address?",
+      "Why does Prologis have a right to win or a right to play?",
+      "What would need to happen for the opportunity to scale?",
+    ],
+    format: ["3-5 opportunities maximum", "Short paragraph or 3-5 bullets for each opportunity"],
+  },
+  support: {
+    intent: "Make the support required from Prologis specific enough for leaders and cross-functional partners to act on.",
+    answer: [
+      "What approvals are needed?",
+      "What organizational support is required?",
+      "What cross-functional dependencies matter most?",
+      "What decisions or actions would accelerate progress?",
+      "What could slow execution if not addressed?",
+    ],
+    format: ["3-5 bullets", "Each bullet should represent a specific ask or dependency"],
+  },
+  "ai-productivity": {
+    intent: "Explain how AI will increase productivity, improve execution, and help the business scale.",
+    answer: [
+      "How will AI be incorporated into the team's operating model?",
+      "What activities will be automated, accelerated, or augmented?",
+      "What measurable efficiency gains are expected?",
+      "How will AI improve decision-making, customer engagement, analysis, or execution?",
+      "How does AI influence the team's future hiring strategy?",
+    ],
+    format: ["1-2 short paragraphs"],
+  },
+  headcount: {
+    intent: "Include only the headcount or capability requests necessary to execute the plan.",
+    answer: [
+      "What role or capability is needed?",
+      "What business problem does it solve?",
+      "Why is it needed now?",
+      "How does it support revenue growth, execution speed, or risk reduction?",
+      "What is the expected return on the investment?",
+    ],
+    format: ["Bullet format", "For each request: role or capability, purpose, and ROI rationale"],
+  },
+  risks: {
+    intent: "Identify risks and assumptions that could materially affect approval or execution of the plan.",
+    answer: [
+      "What are the biggest risks?",
+      "What assumptions must prove true?",
+      "What dependencies exist inside or outside Prologis?",
+      "What would cause us to slow down, change course, or stop?",
+    ],
+    format: ["3-5 bullets", "Only include risks that matter to the approval decision"],
+  },
+  "bottom-line-ask": {
+    intent: "End with the leadership decision, the key drivers of success, and the most important takeaway.",
+    answer: [
+      "What are we asking leadership to approve?",
+      "What are the key drivers of success in 2027?",
+      "What is the most important takeaway from the plan?",
+    ],
+    format: ["1 short paragraph", "Maximum of 4 sentences"],
+  },
+};
+
 const strategyChecks = [
   "What is the real strategic choice?",
   "What are we choosing not to do?",
@@ -128,6 +220,7 @@ export default function Home() {
   const [draftComment, setDraftComment] = useState("");
   const [visibility, setVisibility] = useState<Visibility>("Public");
   const [howToOpen, setHowToOpen] = useState(false);
+  const [guidanceOpen, setGuidanceOpen] = useState(true);
 
   const activeSection = sections.find((section) => section.id === activeSectionId) ?? sections[0];
   const activeComments = useMemo(
@@ -434,6 +527,7 @@ export default function Home() {
                       onClick={() => {
                         setActiveSectionId(section.id);
                         setDrawer(null);
+                        setGuidanceOpen(true);
                       }}
                     >
                       <span className="block font-medium">{section.title}</span>
@@ -462,7 +556,7 @@ export default function Home() {
                       className="rounded-md border border-[#b9b6ae] px-3 py-2 text-sm font-semibold hover:bg-[#f2f1ec]"
                       onClick={() => setDrawer("coach")}
                     >
-                      Coach
+                      GPT Coach
                     </button>
                   ) : null}
                   <button
@@ -476,6 +570,12 @@ export default function Home() {
 
               <div className="grid min-h-[560px] gap-0 xl:grid-cols-[minmax(0,1fr)_380px]">
                 <div className="p-5">
+                  <SectionGuidancePanel
+                    guidance={sectionGuidance[activeSection.id]}
+                    open={guidanceOpen}
+                    onToggle={() => setGuidanceOpen((current) => !current)}
+                  />
+
                   {role === "business" ? (
                     <BusinessEditor
                       section={activeSection}
@@ -599,6 +699,70 @@ function TeamNameEntry({
   );
 }
 
+function SectionGuidancePanel({
+  guidance,
+  open,
+  onToggle,
+}: {
+  guidance?: SectionGuidance;
+  open: boolean;
+  onToggle: () => void;
+}) {
+  if (!guidance) return null;
+
+  return (
+    <section className="mb-5 rounded-lg border border-[#d8d6cf] bg-[#fbfaf7]">
+      <button
+        className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left"
+        onClick={onToggle}
+      >
+        <span>
+          <span className="block text-sm font-semibold">Guidance</span>
+          <span className="mt-0.5 block text-xs text-[#68716b]">
+            Expectations for this section
+          </span>
+        </span>
+        <span className="text-sm font-semibold text-[#1f5d3a]">
+          {open ? "Hide" : "Show"}
+        </span>
+      </button>
+      {open ? (
+        <div className="border-t border-[#e5e2da] px-4 py-4">
+          <p className="text-sm leading-6 text-[#3f4842]">{guidance.intent}</p>
+          <div className="mt-4 grid gap-4 md:grid-cols-[minmax(0,1fr)_260px]">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wide text-[#68716b]">
+                Answer
+              </p>
+              <ul className="mt-2 space-y-1.5 text-sm leading-6 text-[#242a26]">
+                {guidance.answer.map((item) => (
+                  <li className="flex gap-2" key={item}>
+                    <span aria-hidden="true" className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-[#1f5d3a]" />
+                    <span>{item}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wide text-[#68716b]">
+                Format
+              </p>
+              <ul className="mt-2 space-y-1.5 text-sm leading-6 text-[#242a26]">
+                {guidance.format.map((item) => (
+                  <li className="flex gap-2" key={item}>
+                    <span aria-hidden="true" className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-[#949084]" />
+                    <span>{item}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </div>
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
 function FullMemoReader({
   sections,
   comments,
@@ -717,7 +881,7 @@ function CoachDrawer({
 }) {
   return (
     <div>
-      <DrawerHeader title="Coach" onClose={onClose} />
+      <DrawerHeader title="GPT Coach" onClose={onClose} />
       <p className="text-sm leading-6 text-[#525c55]">
         Use these questions to sharpen the section. Do not let ChatGPT invent facts.
       </p>
@@ -872,7 +1036,7 @@ function HowToModal({ onClose }: { onClose: () => void }) {
 
         <div className="mt-5 grid gap-3 text-sm leading-6 text-[#3f4842]">
           <p>
-            <strong>Business Team:</strong> draft one section at a time, use Coach
+            <strong>Business Team:</strong> draft one section at a time, use GPT Coach
             for thinking prompts, then move sections from Draft to Review.
           </p>
           <p>
@@ -886,7 +1050,7 @@ function HowToModal({ onClose }: { onClose: () => void }) {
           <p>
             <strong>Approver:</strong> review the same memo, ask questions, and set
             approval posture when a section is ready. Approvers use Questions,
-            not Coach.
+            not GPT Coach.
           </p>
           <p>
             <strong>Export PDF:</strong> creates a clean memo-only print view without
