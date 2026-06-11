@@ -7,7 +7,7 @@ type SectionStatus = "Draft" | "Review" | "Approved";
 type CommentStatus = "Open" | "Acknowledged" | "Resolved";
 type Visibility = "Public" | "Draft" | "Private";
 type ApprovalPosture = "Needs clarification" | "Ready" | "Approved";
-type DrawerMode = "coach" | "questions" | null;
+type SidePanelMode = "guidance" | "questions";
 type ViewMode = "section" | "memo";
 
 type MemoSection = {
@@ -213,7 +213,7 @@ export default function Home() {
   const [comments, setComments] = useState<SectionComment[]>([]);
   const [approvals, setApprovals] = useState<Approval[]>([]);
   const [activeSectionId, setActiveSectionId] = useState("");
-  const [drawer, setDrawer] = useState<DrawerMode>(null);
+  const [sidePanel, setSidePanel] = useState<SidePanelMode>("guidance");
   const [viewMode, setViewMode] = useState<ViewMode>("section");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -221,6 +221,7 @@ export default function Home() {
   const [visibility, setVisibility] = useState<Visibility>("Public");
   const [howToOpen, setHowToOpen] = useState(false);
   const [guidanceOpen, setGuidanceOpen] = useState(true);
+  const [coachOpen, setCoachOpen] = useState(false);
 
   const activeSection = sections.find((section) => section.id === activeSectionId) ?? sections[0];
   const activeComments = useMemo(
@@ -254,10 +255,10 @@ export default function Home() {
   }, [role]);
 
   useEffect(() => {
-    if (role !== "business" && drawer === "coach") {
-      setDrawer(null);
+    if (role !== "business") {
+      setCoachOpen(false);
     }
-  }, [role, drawer]);
+  }, [role]);
 
   async function loadWorkspace(nextRole = role) {
     setLoading(true);
@@ -402,7 +403,7 @@ export default function Home() {
                   key={item}
                   onClick={() => {
                     setRole(item);
-                    setDrawer(null);
+                    setSidePanel("guidance");
                   }}
                 >
                   {roleLabels[item]}
@@ -444,7 +445,7 @@ export default function Home() {
                 }`}
                 onClick={() => {
                   setViewMode("section");
-                  setDrawer(null);
+                  setSidePanel("guidance");
                 }}
               >
                 Section
@@ -457,7 +458,7 @@ export default function Home() {
                 }`}
                 onClick={() => {
                   setViewMode("memo");
-                  setDrawer(null);
+                  setSidePanel("guidance");
                 }}
               >
                 Full memo
@@ -486,10 +487,10 @@ export default function Home() {
               comments={comments}
               onOpenQuestions={(sectionId) => {
                 setActiveSectionId(sectionId);
-                setDrawer("questions");
+                setSidePanel("questions");
               }}
             />
-            {drawer === "questions" ? (
+            {sidePanel === "questions" ? (
               <aside className="drawer rounded-lg border border-[#d8d6cf] bg-[#fbfaf7] p-5">
                 <QuestionsDrawer
                   role={role}
@@ -497,7 +498,7 @@ export default function Home() {
                   draftComment={draftComment}
                   visibility={visibility}
                   saving={saving}
-                  onClose={() => setDrawer(null)}
+                  onClose={() => setSidePanel("guidance")}
                   onCommentChange={setDraftComment}
                   onVisibilityChange={setVisibility}
                   onCreate={createQuestion}
@@ -526,7 +527,7 @@ export default function Home() {
                       key={section.id}
                       onClick={() => {
                         setActiveSectionId(section.id);
-                        setDrawer(null);
+                        setSidePanel("guidance");
                         setGuidanceOpen(true);
                       }}
                     >
@@ -550,32 +551,10 @@ export default function Home() {
                   <h2 className="mt-1 text-2xl font-semibold">{activeSection.title}</h2>
                   <p className="mt-2 text-sm text-[#5d665f]">{activeSection.requirement}</p>
                 </div>
-                <div className="flex flex-wrap gap-2">
-                  {role === "business" ? (
-                    <button
-                      className="rounded-md border border-[#b9b6ae] px-3 py-2 text-sm font-semibold hover:bg-[#f2f1ec]"
-                      onClick={() => setDrawer("coach")}
-                    >
-                      GPT Coach
-                    </button>
-                  ) : null}
-                  <button
-                    className="rounded-md border border-[#b9b6ae] px-3 py-2 text-sm font-semibold hover:bg-[#f2f1ec]"
-                    onClick={() => setDrawer("questions")}
-                  >
-                    Questions {openQuestions > 0 ? `(${openQuestions})` : ""}
-                  </button>
-                </div>
               </div>
 
-              <div className="grid min-h-[560px] gap-0 xl:grid-cols-[minmax(0,1fr)_380px]">
+              <div className="grid min-h-[560px] gap-0 lg:grid-cols-[minmax(0,1fr)_380px]">
                 <div className="p-5">
-                  <SectionGuidancePanel
-                    guidance={sectionGuidance[activeSection.id]}
-                    open={guidanceOpen}
-                    onToggle={() => setGuidanceOpen((current) => !current)}
-                  />
-
                   {role === "business" ? (
                     <BusinessEditor
                       section={activeSection}
@@ -609,35 +588,46 @@ export default function Home() {
                   ) : null}
                 </div>
 
-                {drawer ? (
-                  <aside className="drawer border-t border-[#e5e2da] bg-[#fbfaf7] p-5 xl:border-l xl:border-t-0">
-                    {drawer === "coach" ? (
-                      <CoachDrawer
-                        section={activeSection}
-                        prompt={coachPrompt}
-                        onClose={() => setDrawer(null)}
-                      />
-                    ) : (
-                      <QuestionsDrawer
-                        role={role}
-                        comments={activeComments}
-                        draftComment={draftComment}
-                        visibility={visibility}
-                        saving={saving}
-                        onClose={() => setDrawer(null)}
-                        onCommentChange={setDraftComment}
-                        onVisibilityChange={setVisibility}
-                        onCreate={createQuestion}
-                        onUpdate={updateQuestion}
-                      />
-                    )}
-                  </aside>
-                ) : null}
+                <aside className="border-t border-[#e5e2da] bg-[#fbfaf7] p-5 lg:border-l lg:border-t-0">
+                  {sidePanel === "guidance" ? (
+                    <SectionGuidancePanel
+                      guidance={sectionGuidance[activeSection.id]}
+                      open={guidanceOpen}
+                      role={role}
+                      openQuestions={openQuestions}
+                      onToggle={() => setGuidanceOpen((current) => !current)}
+                      onOpenCoach={() => setCoachOpen(true)}
+                      onOpenQuestions={() => setSidePanel("questions")}
+                    />
+                  ) : (
+                    <QuestionsDrawer
+                      role={role}
+                      comments={activeComments}
+                      draftComment={draftComment}
+                      visibility={visibility}
+                      saving={saving}
+                      onClose={() => setSidePanel("guidance")}
+                      onCommentChange={setDraftComment}
+                      onVisibilityChange={setVisibility}
+                      onCreate={createQuestion}
+                      onUpdate={updateQuestion}
+                    />
+                  )}
+                </aside>
               </div>
             </section>
           </div>
         )}
       </div>
+
+      {coachOpen && activeSection ? (
+        <CoachModal
+          section={activeSection}
+          guidance={sectionGuidance[activeSection.id]}
+          prompt={coachPrompt}
+          onClose={() => setCoachOpen(false)}
+        />
+      ) : null}
 
       {howToOpen ? <HowToModal onClose={() => setHowToOpen(false)} /> : null}
 
@@ -702,18 +692,26 @@ function TeamNameEntry({
 function SectionGuidancePanel({
   guidance,
   open,
+  role,
+  openQuestions,
   onToggle,
+  onOpenCoach,
+  onOpenQuestions,
 }: {
   guidance?: SectionGuidance;
   open: boolean;
+  role: Role;
+  openQuestions: number;
   onToggle: () => void;
+  onOpenCoach: () => void;
+  onOpenQuestions: () => void;
 }) {
   if (!guidance) return null;
 
   return (
-    <section className="mb-5 rounded-lg border border-[#d8d6cf] bg-[#fbfaf7]">
+    <section>
       <button
-        className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left"
+        className="flex w-full items-center justify-between gap-3 rounded-lg border border-[#d8d6cf] bg-white px-4 py-3 text-left"
         onClick={onToggle}
       >
         <span>
@@ -726,10 +724,26 @@ function SectionGuidancePanel({
           {open ? "Hide" : "Show"}
         </span>
       </button>
+      <div className="mt-3 grid gap-2">
+        {role === "business" ? (
+          <button
+            className="rounded-md bg-[#1f5d3a] px-3 py-2 text-sm font-semibold text-white hover:bg-[#17462c]"
+            onClick={onOpenCoach}
+          >
+            GPT Coach
+          </button>
+        ) : null}
+        <button
+          className="rounded-md border border-[#b9b6ae] bg-white px-3 py-2 text-sm font-semibold hover:bg-[#f2f1ec]"
+          onClick={onOpenQuestions}
+        >
+          Questions {openQuestions > 0 ? `(${openQuestions})` : ""}
+        </button>
+      </div>
       {open ? (
-        <div className="border-t border-[#e5e2da] px-4 py-4">
+        <div className="mt-3 rounded-lg border border-[#d8d6cf] bg-white px-4 py-4">
           <p className="text-sm leading-6 text-[#3f4842]">{guidance.intent}</p>
-          <div className="mt-4 grid gap-4 md:grid-cols-[minmax(0,1fr)_260px]">
+          <div className="mt-4 grid gap-4">
             <div>
               <p className="text-xs font-semibold uppercase tracking-wide text-[#68716b]">
                 Answer
@@ -870,34 +884,110 @@ function MemoReader({ section }: { section: MemoSection }) {
   );
 }
 
-function CoachDrawer({
+function CoachModal({
   section,
+  guidance,
   prompt,
   onClose,
 }: {
   section: MemoSection;
+  guidance?: SectionGuidance;
   prompt: string;
   onClose: () => void;
 }) {
+  const [coachQuestion, setCoachQuestion] = useState("");
+  const questionOptions = [
+    ...(guidance?.answer ?? []),
+    ...(sectionCoach[section.id] ?? []),
+    ...strategyChecks,
+  ];
+  const uniqueQuestions = Array.from(new Set(questionOptions));
+  const finalPrompt = `${prompt}\n\nQuestions to pressure-test:\n${coachQuestion.trim() || "- Ask me the most important questions this section must answer."}`;
+  const chatGptUrl = `https://chatgpt.com/?q=${encodeURIComponent(finalPrompt)}`;
+
+  function addQuestion(question: string) {
+    setCoachQuestion((current) => {
+      const cleanCurrent = current.trim();
+      const nextQuestion = `- ${question}`;
+      return cleanCurrent ? `${cleanCurrent}\n${nextQuestion}` : nextQuestion;
+    });
+  }
+
   return (
-    <div>
-      <DrawerHeader title="GPT Coach" onClose={onClose} />
-      <p className="text-sm leading-6 text-[#525c55]">
-        Use these questions to sharpen the section. Do not let ChatGPT invent facts.
-      </p>
-      <div className="mt-4 space-y-2">
-        {[...(sectionCoach[section.id] ?? []), ...strategyChecks].map((question) => (
-          <div className="rounded-md border border-[#d8d6cf] bg-white p-3 text-sm" key={question}>
-            {question}
+    <div className="no-print fixed inset-0 z-50 flex items-center justify-center bg-black/30 px-4 py-6">
+      <div className="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-lg border border-[#d8d6cf] bg-white p-5 shadow-xl">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wide text-[#68716b]">
+              GPT Coach
+            </p>
+            <h2 className="mt-1 text-xl font-semibold">{section.title}</h2>
           </div>
-        ))}
+          <button
+            className="rounded-md border border-[#c9c6be] px-3 py-1.5 text-sm font-semibold hover:bg-[#f2f1ec]"
+            onClick={onClose}
+          >
+            Close
+          </button>
+        </div>
+
+        <p className="mt-4 text-sm leading-6 text-[#525c55]">
+          Use GPT to brainstorm questions and pressure-test the section. Do not ask it to invent facts or write the answer for the team.
+        </p>
+
+        <div className="mt-5">
+          <p className="text-xs font-semibold uppercase tracking-wide text-[#68716b]">
+            Add from guidance
+          </p>
+          <div className="mt-2 flex flex-wrap gap-2">
+            {uniqueQuestions.map((question) => (
+              <button
+                className="rounded-md border border-[#c9c6be] bg-[#fbfaf7] px-3 py-2 text-left text-sm hover:bg-[#f2f1ec]"
+                key={question}
+                onClick={() => addQuestion(question)}
+              >
+                {question}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <label className="mt-5 block text-sm font-semibold">
+          Your question
+          <textarea
+            className="mt-2 min-h-28 w-full resize-y rounded-md border border-[#c9c6be] bg-[#fffefa] p-3 text-sm leading-6 outline-none focus:border-[#1f5d3a]"
+            value={coachQuestion}
+            onChange={(event) => setCoachQuestion(event.target.value)}
+            placeholder="Ask GPT to help pressure-test the logic, identify missing decisions, or sharpen the leadership ask."
+          />
+        </label>
+
+        <div className="mt-5 rounded-lg border border-[#d8d6cf] bg-[#fbfaf7] p-4">
+          <p className="text-xs font-semibold uppercase tracking-wide text-[#68716b]">
+            Prompt
+          </p>
+          <pre className="mt-2 max-h-56 overflow-y-auto whitespace-pre-wrap text-sm leading-6 text-[#242a26]">
+            {finalPrompt}
+          </pre>
+        </div>
+
+        <div className="mt-5 flex flex-col gap-2 sm:flex-row sm:justify-end">
+          <button
+            className="rounded-md border border-[#b9b6ae] px-3 py-2 text-sm font-semibold hover:bg-[#f2f1ec]"
+            onClick={() => navigator.clipboard.writeText(finalPrompt)}
+          >
+            Copy prompt
+          </button>
+          <a
+            className="rounded-md bg-[#1f5d3a] px-3 py-2 text-center text-sm font-semibold text-white hover:bg-[#17462c]"
+            href={chatGptUrl}
+            rel="noreferrer"
+            target="_blank"
+          >
+            Open ChatGPT
+          </a>
+        </div>
       </div>
-      <button
-        className="mt-4 w-full rounded-md bg-[#1f5d3a] px-3 py-2 text-sm font-semibold text-white hover:bg-[#17462c]"
-        onClick={() => navigator.clipboard.writeText(prompt)}
-      >
-        Copy ChatGPT prompt
-      </button>
     </div>
   );
 }
@@ -1036,8 +1126,9 @@ function HowToModal({ onClose }: { onClose: () => void }) {
 
         <div className="mt-5 grid gap-3 text-sm leading-6 text-[#3f4842]">
           <p>
-            <strong>Business Team:</strong> draft one section at a time, use GPT Coach
-            for thinking prompts, then move sections from Draft to Review.
+            <strong>Business Team:</strong> draft one section at a time, use the
+            guidance panel for expectations, and open GPT Coach when you want
+            help brainstorming questions.
           </p>
           <p>
             <strong>Full memo:</strong> switch from Section to Full memo when you
