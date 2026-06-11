@@ -8,6 +8,7 @@ type CommentStatus = "Open" | "Acknowledged" | "Resolved";
 type Visibility = "Public" | "Draft" | "Private";
 type ApprovalPosture = "Needs clarification" | "Ready" | "Approved";
 type DrawerMode = "coach" | "questions" | null;
+type ViewMode = "section" | "memo";
 
 type MemoSection = {
   id: string;
@@ -121,6 +122,7 @@ export default function Home() {
   const [approvals, setApprovals] = useState<Approval[]>([]);
   const [activeSectionId, setActiveSectionId] = useState("");
   const [drawer, setDrawer] = useState<DrawerMode>(null);
+  const [viewMode, setViewMode] = useState<ViewMode>("section");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [draftComment, setDraftComment] = useState("");
@@ -339,7 +341,35 @@ export default function Home() {
         ) : null}
 
         {hasTeamName ? (
-          <section className="mb-5 flex justify-end">
+          <section className="mb-5 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+            <div className="inline-grid w-full grid-cols-2 rounded-lg border border-[#d0cec7] bg-white p-1 text-sm sm:w-auto">
+              <button
+                className={`rounded-md px-3 py-2 font-medium ${
+                  viewMode === "section"
+                    ? "bg-[#1f5d3a] text-white"
+                    : "text-[#3f4842] hover:bg-[#eef1ec]"
+                }`}
+                onClick={() => {
+                  setViewMode("section");
+                  setDrawer(null);
+                }}
+              >
+                Section
+              </button>
+              <button
+                className={`rounded-md px-3 py-2 font-medium ${
+                  viewMode === "memo"
+                    ? "bg-[#1f5d3a] text-white"
+                    : "text-[#3f4842] hover:bg-[#eef1ec]"
+                }`}
+                onClick={() => {
+                  setViewMode("memo");
+                  setDrawer(null);
+                }}
+              >
+                Full memo
+              </button>
+            </div>
             <div className="grid grid-cols-3 gap-2 text-sm">
               <SummaryPill label="Approved" value={`${approvedSections}/${sections.length || 8}`} />
               <SummaryPill label="Questions" value={`${totalOpenQuestions} open`} />
@@ -355,6 +385,33 @@ export default function Home() {
         ) : !hasTeamName ? null : !activeSection ? (
           <div className="rounded-lg border border-[#d8d6cf] bg-white p-8 text-sm">
             Loading sections...
+          </div>
+        ) : viewMode === "memo" ? (
+          <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_380px]">
+            <FullMemoReader
+              sections={sections}
+              comments={comments}
+              onOpenQuestions={(sectionId) => {
+                setActiveSectionId(sectionId);
+                setDrawer("questions");
+              }}
+            />
+            {drawer === "questions" ? (
+              <aside className="drawer rounded-lg border border-[#d8d6cf] bg-[#fbfaf7] p-5">
+                <QuestionsDrawer
+                  role={role}
+                  comments={activeComments}
+                  draftComment={draftComment}
+                  visibility={visibility}
+                  saving={saving}
+                  onClose={() => setDrawer(null)}
+                  onCommentChange={setDraftComment}
+                  onVisibilityChange={setVisibility}
+                  onCreate={createQuestion}
+                  onUpdate={updateQuestion}
+                />
+              </aside>
+            ) : null}
           </div>
         ) : (
           <div className="grid gap-4 lg:grid-cols-[260px_minmax(0,1fr)]">
@@ -538,6 +595,57 @@ function TeamNameEntry({
       >
         {saving ? "Saving..." : "Save"}
       </button>
+    </section>
+  );
+}
+
+function FullMemoReader({
+  sections,
+  comments,
+  onOpenQuestions,
+}: {
+  sections: MemoSection[];
+  comments: SectionComment[];
+  onOpenQuestions: (sectionId: string) => void;
+}) {
+  return (
+    <section className="rounded-lg border border-[#d8d6cf] bg-white">
+      <div className="border-b border-[#e5e2da] p-5">
+        <p className="text-xs font-semibold uppercase tracking-wide text-[#5b665f]">
+          Full memo
+        </p>
+        <h2 className="mt-1 text-2xl font-semibold">Read the complete plan</h2>
+      </div>
+      <div className="divide-y divide-[#ebe8e1]">
+        {sections.map((section) => {
+          const openCount = comments.filter(
+            (comment) =>
+              comment.sectionId === section.id && comment.status === "Open",
+          ).length;
+
+          return (
+            <article className="p-5" key={section.id}>
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-wide text-[#68716b]">
+                    Section {section.position}
+                  </p>
+                  <h3 className="mt-1 text-xl font-semibold">{section.title}</h3>
+                </div>
+                <button
+                  className="rounded-md border border-[#b9b6ae] px-3 py-2 text-sm font-semibold hover:bg-[#f2f1ec]"
+                  onClick={() => onOpenQuestions(section.id)}
+                >
+                  Questions {openCount > 0 ? `(${openCount})` : ""}
+                </button>
+              </div>
+              <div className="mt-4 whitespace-pre-wrap rounded-lg border border-[#e2ded6] bg-[#fffefa] p-4 text-sm leading-7 text-[#242a26]">
+                {section.content.trim() || "Section draft pending."}
+              </div>
+            </article>
+          );
+        })}
+      </div>
     </section>
   );
 }
@@ -766,6 +874,10 @@ function HowToModal({ onClose }: { onClose: () => void }) {
           <p>
             <strong>Business Team:</strong> draft one section at a time, use Coach
             for thinking prompts, then move sections from Draft to Review.
+          </p>
+          <p>
+            <strong>Full memo:</strong> switch from Section to Full memo when you
+            want to read the complete plan in one pass.
           </p>
           <p>
             <strong>Enablement:</strong> review the memo and use Questions to add
