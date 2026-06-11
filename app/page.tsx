@@ -114,7 +114,8 @@ function roleAuthor(role: Role) {
 
 export default function Home() {
   const [role, setRole] = useState<Role>("business");
-  const [teamName, setTeamName] = useState("Team");
+  const [teamName, setTeamName] = useState("");
+  const [teamNameEntry, setTeamNameEntry] = useState("");
   const [sections, setSections] = useState<MemoSection[]>([]);
   const [comments, setComments] = useState<SectionComment[]>([]);
   const [approvals, setApprovals] = useState<Approval[]>([]);
@@ -147,7 +148,11 @@ export default function Home() {
     totalOpenQuestions === 0
       ? "Ready for approval"
       : `${totalOpenQuestions} open question${totalOpenQuestions === 1 ? "" : "s"}`;
-  const planTitle = `2027 ${teamName || "Team"} Business Plan`;
+  const cleanTeamName = teamName.trim();
+  const hasTeamName = cleanTeamName.length > 0 && cleanTeamName !== "Team";
+  const planTitle = hasTeamName
+    ? `2027 ${cleanTeamName} Business Plan`
+    : "2027 Business Plan";
 
   useEffect(() => {
     void loadWorkspace(role);
@@ -166,7 +171,9 @@ export default function Home() {
       throw new Error(payload.error ?? "Failed to load plan");
     }
 
-    setTeamName(payload.plan?.teamName || "Team");
+    const loadedTeamName = payload.plan?.teamName || "";
+    setTeamName(loadedTeamName);
+    setTeamNameEntry((current) => current || (loadedTeamName === "Team" ? "" : loadedTeamName));
     setSections(payload.sections);
     setComments(payload.comments);
     setApprovals(payload.approvals);
@@ -174,8 +181,11 @@ export default function Home() {
     setLoading(false);
   }
 
-  async function savePlanName(nextTeamName = teamName) {
-    const cleanName = nextTeamName.trim() || "Team";
+  async function savePlanName(nextTeamName = teamNameEntry) {
+    const cleanName = nextTeamName.trim();
+    if (!cleanName) return;
+
+    setSaving(true);
     setTeamName(cleanName);
     await fetch("/api/plan", {
       method: "POST",
@@ -185,6 +195,7 @@ export default function Home() {
         teamName: cleanName,
       }),
     });
+    setSaving(false);
   }
 
   async function saveSection(section: MemoSection) {
@@ -279,15 +290,6 @@ export default function Home() {
         <header className="mb-5 flex flex-col gap-4 border-b border-[#d8d6cf] pb-4 lg:flex-row lg:items-center lg:justify-between">
           <div>
             <h1 className="text-2xl font-semibold">{planTitle}</h1>
-            <label className="mt-3 block max-w-xs text-xs font-semibold uppercase tracking-wide text-[#68716b]">
-              Team name
-              <input
-                className="mt-1 w-full rounded-md border border-[#c9c6be] bg-white px-3 py-2 text-sm font-medium normal-case tracking-normal outline-none focus:border-[#1f5d3a]"
-                value={teamName}
-                onBlur={() => savePlanName()}
-                onChange={(event) => setTeamName(event.target.value)}
-              />
-            </label>
           </div>
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
             <div className="inline-grid grid-cols-3 rounded-lg border border-[#d0cec7] bg-white p-1 text-sm">
@@ -321,17 +323,32 @@ export default function Home() {
           </div>
         </header>
 
-        <section className="mb-5 flex justify-end">
-          <div className="grid grid-cols-3 gap-2 text-sm">
-            <SummaryPill label="Approved" value={`${approvedSections}/${sections.length || 8}`} />
-            <SummaryPill label="Questions" value={`${totalOpenQuestions} open`} />
-            <SummaryPill label="Memo" value={`${pageEstimate}/4 pages`} />
-          </div>
-        </section>
+        {!loading && !hasTeamName ? (
+          <TeamNameEntry
+            saving={saving}
+            value={teamNameEntry}
+            onChange={setTeamNameEntry}
+            onSave={() => savePlanName(teamNameEntry)}
+          />
+        ) : null}
 
-        {loading || !activeSection ? (
+        {hasTeamName ? (
+          <section className="mb-5 flex justify-end">
+            <div className="grid grid-cols-3 gap-2 text-sm">
+              <SummaryPill label="Approved" value={`${approvedSections}/${sections.length || 8}`} />
+              <SummaryPill label="Questions" value={`${totalOpenQuestions} open`} />
+              <SummaryPill label="Memo" value={`${pageEstimate}/4 pages`} />
+            </div>
+          </section>
+        ) : null}
+
+        {loading ? (
           <div className="rounded-lg border border-[#d8d6cf] bg-white p-8 text-sm">
             Loading workspace...
+          </div>
+        ) : !hasTeamName ? null : !activeSection ? (
+          <div className="rounded-lg border border-[#d8d6cf] bg-white p-8 text-sm">
+            Loading sections...
           </div>
         ) : (
           <div className="grid gap-4 lg:grid-cols-[260px_minmax(0,1fr)]">
@@ -470,6 +487,50 @@ function SummaryPill({ label, value }: { label: string; value: string }) {
       <p className="text-[11px] font-semibold uppercase text-[#68716b]">{label}</p>
       <p className="mt-0.5 font-semibold">{value}</p>
     </div>
+  );
+}
+
+function TeamNameEntry({
+  saving,
+  value,
+  onChange,
+  onSave,
+}: {
+  saving: boolean;
+  value: string;
+  onChange: (value: string) => void;
+  onSave: () => void;
+}) {
+  return (
+    <section className="mx-auto mt-20 max-w-xl rounded-lg border border-[#d8d6cf] bg-white p-6 shadow-sm">
+      <p className="text-xs font-semibold uppercase tracking-wide text-[#68716b]">
+        New business plan
+      </p>
+      <h2 className="mt-2 text-2xl font-semibold">Name the team</h2>
+      <p className="mt-2 text-sm leading-6 text-[#56615a]">
+        This will become the plan title.
+      </p>
+      <label className="mt-5 block text-sm font-semibold">
+        Team name
+        <input
+          autoFocus
+          className="mt-2 w-full rounded-md border border-[#c9c6be] bg-[#fffefa] px-3 py-2 text-base outline-none focus:border-[#1f5d3a]"
+          onChange={(event) => onChange(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") onSave();
+          }}
+          placeholder="Data Centers"
+          value={value}
+        />
+      </label>
+      <button
+        className="mt-4 rounded-md bg-[#1f5d3a] px-4 py-2 text-sm font-semibold text-white hover:bg-[#17462c] disabled:cursor-not-allowed disabled:opacity-50"
+        disabled={saving || !value.trim()}
+        onClick={onSave}
+      >
+        {saving ? "Saving..." : "Save"}
+      </button>
+    </section>
   );
 }
 

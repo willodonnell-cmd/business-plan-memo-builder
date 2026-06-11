@@ -106,7 +106,7 @@ async function ensureSeedData() {
   await db.insert(businessPlans).values({
     id: PLAN_ID,
     title: "2027 Business Plan",
-    teamName: "Team",
+    teamName: "",
   });
 
   await db.insert(memoSections).values(
@@ -164,7 +164,11 @@ export async function POST(request: Request) {
     const action = payload.action;
 
     if (action === "save-plan") {
-      const teamName = String(payload.teamName ?? "").trim() || "Team";
+      const teamName = String(payload.teamName ?? "").trim();
+
+      if (!teamName) {
+        return Response.json({ error: "Team name is required" }, { status: 400 });
+      }
 
       await db
         .update(businessPlans)
