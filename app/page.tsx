@@ -195,6 +195,49 @@ const strategyChecks = [
   "What decision does leadership need to make?",
 ];
 
+const coachStarters: Record<string, string[]> = {
+  "executive-summary": [
+    "What is the one business thesis leadership needs to understand?",
+    "What would make this summary approval-ready?",
+    "Which takeaways are strongest, and which are noise?",
+  ],
+  priorities: [
+    "Are these truly the top three priorities?",
+    "What decision does each priority require?",
+    "What should we stop doing to make room for these priorities?",
+  ],
+  growth: [
+    "Which opportunities are most material over the next several years?",
+    "What must be true for this opportunity to scale?",
+    "Why does Prologis have a right to win?",
+  ],
+  support: [
+    "Which asks require a leadership decision?",
+    "What dependency could slow execution?",
+    "How can we make each ask more specific?",
+  ],
+  "ai-productivity": [
+    "Where can AI create measurable productivity gains?",
+    "Which activities should be automated, accelerated, or augmented?",
+    "How should AI change future hiring needs?",
+  ],
+  headcount: [
+    "Which roles are essential to execute the plan?",
+    "What ROI case is missing or weak?",
+    "Why is this capability needed now?",
+  ],
+  risks: [
+    "Which risks matter to the approval decision?",
+    "What assumptions must prove true?",
+    "What would cause us to slow down or change course?",
+  ],
+  "bottom-line-ask": [
+    "Is the approval ask specific enough?",
+    "What is the most important takeaway for leadership?",
+    "What would make this closing more decisive?",
+  ],
+};
+
 function countWords(value: string) {
   return value.trim().split(/\s+/).filter(Boolean).length;
 }
@@ -383,7 +426,7 @@ export default function Home() {
   }
 
   const coachPrompt = activeSection
-    ? `Act as a business plan thinking coach for the 2027 Prologis business plan. Do not write the answer for the team and do not make assumptions. Ask concise questions that help the team improve the "${activeSection.title}" section. Focus on strategic choice, what must be true, required support, risks, and approval implications.\n\nCurrent draft:\n${activeSection.content}`
+    ? `Act as a business plan thinking coach for the 2027 Prologis business plan. Do not write the section. Do not invent facts. Ask concise questions that help the team improve the "${activeSection.title}" section for an Executive Committee approval memo.\n\nCurrent draft:\n${activeSection.content}`
     : "";
 
   return (
@@ -623,7 +666,6 @@ export default function Home() {
       {coachOpen && activeSection ? (
         <CoachModal
           section={activeSection}
-          guidance={sectionGuidance[activeSection.id]}
           prompt={coachPrompt}
           onClose={() => setCoachOpen(false)}
         />
@@ -886,31 +928,20 @@ function MemoReader({ section }: { section: MemoSection }) {
 
 function CoachModal({
   section,
-  guidance,
   prompt,
   onClose,
 }: {
   section: MemoSection;
-  guidance?: SectionGuidance;
   prompt: string;
   onClose: () => void;
 }) {
   const [coachQuestion, setCoachQuestion] = useState("");
-  const questionOptions = [
-    ...(guidance?.answer ?? []),
-    ...(sectionCoach[section.id] ?? []),
-    ...strategyChecks,
-  ];
-  const uniqueQuestions = Array.from(new Set(questionOptions));
+  const starterQuestions = coachStarters[section.id] ?? strategyChecks.slice(0, 3);
   const finalPrompt = `${prompt}\n\nQuestions to pressure-test:\n${coachQuestion.trim() || "- Ask me the most important questions this section must answer."}`;
   const chatGptUrl = `https://chatgpt.com/?q=${encodeURIComponent(finalPrompt)}`;
 
   function addQuestion(question: string) {
-    setCoachQuestion((current) => {
-      const cleanCurrent = current.trim();
-      const nextQuestion = `- ${question}`;
-      return cleanCurrent ? `${cleanCurrent}\n${nextQuestion}` : nextQuestion;
-    });
+    setCoachQuestion(question);
   }
 
   return (
@@ -932,17 +963,17 @@ function CoachModal({
         </div>
 
         <p className="mt-4 text-sm leading-6 text-[#525c55]">
-          Use GPT to brainstorm questions and pressure-test the section. Do not ask it to invent facts or write the answer for the team.
+          Use GPT to pressure-test the section. Keep it focused on questions, gaps, and decisions.
         </p>
 
         <div className="mt-5">
           <p className="text-xs font-semibold uppercase tracking-wide text-[#68716b]">
-            Add from guidance
+            Start with one question
           </p>
-          <div className="mt-2 flex flex-wrap gap-2">
-            {uniqueQuestions.map((question) => (
+          <div className="mt-2 grid gap-2">
+            {starterQuestions.map((question) => (
               <button
-                className="rounded-md border border-[#c9c6be] bg-[#fbfaf7] px-3 py-2 text-left text-sm hover:bg-[#f2f1ec]"
+                className="rounded-md border border-[#c9c6be] bg-[#fbfaf7] px-3 py-2 text-left text-sm leading-5 hover:bg-[#f2f1ec]"
                 key={question}
                 onClick={() => addQuestion(question)}
               >
@@ -953,30 +984,21 @@ function CoachModal({
         </div>
 
         <label className="mt-5 block text-sm font-semibold">
-          Your question
+          Ask your own
           <textarea
             className="mt-2 min-h-28 w-full resize-y rounded-md border border-[#c9c6be] bg-[#fffefa] p-3 text-sm leading-6 outline-none focus:border-[#1f5d3a]"
             value={coachQuestion}
             onChange={(event) => setCoachQuestion(event.target.value)}
-            placeholder="Ask GPT to help pressure-test the logic, identify missing decisions, or sharpen the leadership ask."
+            placeholder="Example: What would make this section clearer for an Executive Committee approval decision?"
           />
         </label>
-
-        <div className="mt-5 rounded-lg border border-[#d8d6cf] bg-[#fbfaf7] p-4">
-          <p className="text-xs font-semibold uppercase tracking-wide text-[#68716b]">
-            Prompt
-          </p>
-          <pre className="mt-2 max-h-56 overflow-y-auto whitespace-pre-wrap text-sm leading-6 text-[#242a26]">
-            {finalPrompt}
-          </pre>
-        </div>
 
         <div className="mt-5 flex flex-col gap-2 sm:flex-row sm:justify-end">
           <button
             className="rounded-md border border-[#b9b6ae] px-3 py-2 text-sm font-semibold hover:bg-[#f2f1ec]"
             onClick={() => navigator.clipboard.writeText(finalPrompt)}
           >
-            Copy prompt
+            Copy for ChatGPT
           </button>
           <a
             className="rounded-md bg-[#1f5d3a] px-3 py-2 text-center text-sm font-semibold text-white hover:bg-[#17462c]"
