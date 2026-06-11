@@ -158,6 +158,12 @@ export default function Home() {
     void loadWorkspace(role);
   }, [role]);
 
+  useEffect(() => {
+    if (role !== "business" && drawer === "coach") {
+      setDrawer(null);
+    }
+  }, [role, drawer]);
+
   async function loadWorkspace(nextRole = role) {
     setLoading(true);
     const params = new URLSearchParams({
@@ -394,12 +400,14 @@ export default function Home() {
                   <p className="mt-2 text-sm text-[#5d665f]">{activeSection.requirement}</p>
                 </div>
                 <div className="flex flex-wrap gap-2">
-                  <button
-                    className="rounded-md border border-[#b9b6ae] px-3 py-2 text-sm font-semibold hover:bg-[#f2f1ec]"
-                    onClick={() => setDrawer("coach")}
-                  >
-                    Coach
-                  </button>
+                  {role === "business" ? (
+                    <button
+                      className="rounded-md border border-[#b9b6ae] px-3 py-2 text-sm font-semibold hover:bg-[#f2f1ec]"
+                      onClick={() => setDrawer("coach")}
+                    >
+                      Coach
+                    </button>
+                  ) : null}
                   <button
                     className="rounded-md border border-[#b9b6ae] px-3 py-2 text-sm font-semibold hover:bg-[#f2f1ec]"
                     onClick={() => setDrawer("questions")}
@@ -765,7 +773,8 @@ function HowToModal({ onClose }: { onClose: () => void }) {
           </p>
           <p>
             <strong>Approver:</strong> review the same memo, ask questions, and set
-            approval posture when a section is ready.
+            approval posture when a section is ready. Approvers use Questions,
+            not Coach.
           </p>
           <p>
             <strong>Export PDF:</strong> creates a clean memo-only print view without
