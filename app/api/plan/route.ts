@@ -55,6 +55,11 @@ const seedSections = [
 type Role = "business" | "enablement" | "approver";
 type Visibility = "Public" | "Draft" | "Private";
 
+type ViewerIdentity = {
+  email: string;
+  label: string;
+};
+
 function routeError(error: unknown) {
   const message = error instanceof Error ? error.message : "Unexpected error";
 
@@ -73,21 +78,38 @@ function isVisibility(value: unknown): value is Visibility {
   return value === "Public" || value === "Draft" || value === "Private";
 }
 
-function visibleCommentFilter(role: Role, author: string) {
+function roleAuthor(role: Role) {
+  if (role === "business") return "Business Team";
+  if (role === "enablement") return "Enablement Reviewer";
+  return "Approval Group";
+}
+
+function getViewerIdentity(request: Request, role: Role): ViewerIdentity {
+  const email = request.headers.get("oai-authenticated-user-email")?.trim() || "";
+  return {
+    email,
+    label: email || roleAuthor(role),
+  };
+}
+
+function visibleCommentFilter(role: Role, viewer: ViewerIdentity) {
   if (role === "business") {
     return or(
       eq(sectionComments.visibility, "Public"),
       eq(sectionComments.visibility, "Private"),
       and(
         eq(sectionComments.visibility, "Draft"),
-        eq(sectionComments.author, author),
+        eq(sectionComments.author, viewer.label),
       ),
     );
   }
 
   return or(
     eq(sectionComments.visibility, "Public"),
-    and(eq(sectionComments.author, author), inArray(sectionComments.visibility, ["Draft", "Private"])),
+    and(
+      or(eq(sectionComments.author, viewer.email), eq(sectionComments.author, viewer.label)),
+      inArray(sectionComments.visibility, ["Draft", "Private"]),
+    ),
   );
 }
 
@@ -125,7 +147,7 @@ export async function GET(request: Request) {
     const url = new URL(request.url);
     const requestedRole = url.searchParams.get("role");
     const role: Role = isRole(requestedRole) ? requestedRole : "business";
-    const author = url.searchParams.get("author")?.trim() || "Business Team";
+    const viewer = getViewerIdentity(request, role);
     const db = getDb();
 
     const [plan] = await db
@@ -142,14 +164,23 @@ export async function GET(request: Request) {
       .select()
       .from(sectionComments)
       .where(
-        and(eq(sectionComments.planId, PLAN_ID), visibleCommentFilter(role, author)),
+        and(eq(sectionComments.planId, PLAN_ID), visibleCommentFilter(role, viewer)),
       );
     const approvals = await db
       .select()
       .from(approvalPostures)
       .where(eq(approvalPostures.planId, PLAN_ID));
 
-    return Response.json({ plan, sections, comments, approvals });
+    return Response.json({
+      plan,
+      sections,
+      comments: comments.map((comment) => ({
+        ...comment,
+        canDelete: role === "business" || (!!viewer.email && comment.author === viewer.email),
+      })),
+      approvals,
+      viewer,
+    });
   } catch (error) {
     return Response.json({ error: routeError(error) }, { status: 500 });
   }
@@ -162,6 +193,9 @@ export async function POST(request: Request) {
     const db = getDb();
     const payload = (await request.json()) as Record<string, unknown>;
     const action = payload.action;
+    const requestedRole = String(payload.role ?? "");
+    const role: Role = isRole(requestedRole) ? requestedRole : "business";
+    const viewer = getViewerIdentity(request, role);
 
     if (action === "save-plan") {
       const teamName = String(payload.teamName ?? "").trim();
@@ -197,26 +231,21 @@ export async function POST(request: Request) {
 
     if (action === "create-comment") {
       const sectionId = String(payload.sectionId ?? "");
-      const role = String(payload.role ?? "");
-      const author = String(payload.author ?? "").trim();
       const body = String(payload.body ?? "").trim();
       const visibility = payload.visibility;
 
-      if (!isRole(role)) {
-        return Response.json({ error: "Invalid role" }, { status: 400 });
-      }
       if (!isVisibility(visibility)) {
         return Response.json({ error: "Invalid visibility" }, { status: 400 });
       }
-      if (!author || !body) {
-        return Response.json({ error: "Author and question are required" }, { status: 400 });
+      if (!viewer.label || !body) {
+        return Response.json({ error: "User identity and question are required" }, { status: 400 });
       }
 
       await db.insert(sectionComments).values({
         id: crypto.randomUUID(),
         planId: PLAN_ID,
         sectionId,
-        author,
+        author: viewer.label,
         role,
         body,
         visibility,
@@ -243,6 +272,30 @@ export async function POST(request: Request) {
         })
         .where(eq(sectionComments.id, commentId));
 
+      return Response.json({ ok: true });
+    }
+
+    if (action === "delete-comment") {
+      const commentId = String(payload.commentId ?? "");
+
+      const [comment] = await db
+        .select()
+        .from(sectionComments)
+        .where(and(eq(sectionComments.id, commentId), eq(sectionComments.planId, PLAN_ID)))
+        .limit(1);
+
+      if (!comment) {
+        return Response.json({ error: "Question not found" }, { status: 404 });
+      }
+
+      const canDelete =
+        role === "business" || (!!viewer.email && comment.author === viewer.email);
+
+      if (!canDelete) {
+        return Response.json({ error: "You do not have permission to delete this question" }, { status: 403 });
+      }
+
+      await db.delete(sectionComments).where(eq(sectionComments.id, commentId));
       return Response.json({ ok: true });
     }
 

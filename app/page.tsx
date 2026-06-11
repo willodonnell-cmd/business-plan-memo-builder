@@ -35,6 +35,7 @@ type SectionComment = {
   status: CommentStatus;
   response: string;
   createdAt: string;
+  canDelete?: boolean;
 };
 
 type Approval = {
@@ -47,6 +48,11 @@ type Approval = {
 type CoachMessage = {
   role: "user" | "assistant";
   content: string;
+};
+
+type Viewer = {
+  email: string;
+  label: string;
 };
 
 const roleLabels: Record<Role, string> = {
@@ -270,6 +276,7 @@ export default function Home() {
   const [howToOpen, setHowToOpen] = useState(false);
   const [guidanceOpen, setGuidanceOpen] = useState(true);
   const [coachOpen, setCoachOpen] = useState(false);
+  const [viewer, setViewer] = useState<Viewer>({ email: "", label: "" });
 
   const activeSection = sections.find((section) => section.id === activeSectionId) ?? sections[0];
   const activeComments = useMemo(
@@ -310,10 +317,7 @@ export default function Home() {
 
   async function loadWorkspace(nextRole = role) {
     setLoading(true);
-    const params = new URLSearchParams({
-      role: nextRole,
-      author: roleAuthor(nextRole),
-    });
+    const params = new URLSearchParams({ role: nextRole });
     const response = await fetch(`/api/plan?${params.toString()}`);
     const payload = await response.json();
 
@@ -327,6 +331,7 @@ export default function Home() {
     setSections(payload.sections);
     setComments(payload.comments);
     setApprovals(payload.approvals);
+    setViewer(payload.viewer ?? { email: "", label: roleAuthor(nextRole) });
     setActiveSectionId((current) => current || payload.sections[0]?.id || "");
     setLoading(false);
   }
@@ -374,12 +379,26 @@ export default function Home() {
         action: "create-comment",
         sectionId: activeSection.id,
         role,
-        author: roleAuthor(role),
         body: draftComment,
         visibility,
       }),
     });
     setDraftComment("");
+    setSaving(false);
+    await loadWorkspace(role);
+  }
+
+  async function deleteQuestion(commentId: string) {
+    setSaving(true);
+    await fetch("/api/plan", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action: "delete-comment",
+        role,
+        commentId,
+      }),
+    });
     setSaving(false);
     await loadWorkspace(role);
   }
@@ -537,6 +556,7 @@ export default function Home() {
             {sidePanel === "questions" ? (
               <aside className="drawer rounded-lg border border-[#d8d6cf] bg-[#fbfaf7] p-5">
                 <QuestionsDrawer
+                  viewer={viewer}
                   role={role}
                   comments={activeComments}
                   draftComment={draftComment}
@@ -547,6 +567,7 @@ export default function Home() {
                   onVisibilityChange={setVisibility}
                   onCreate={createQuestion}
                   onUpdate={updateQuestion}
+                  onDelete={deleteQuestion}
                 />
               </aside>
             ) : null}
@@ -645,6 +666,7 @@ export default function Home() {
                     />
                   ) : (
                     <QuestionsDrawer
+                      viewer={viewer}
                       role={role}
                       comments={activeComments}
                       draftComment={draftComment}
@@ -655,6 +677,7 @@ export default function Home() {
                       onVisibilityChange={setVisibility}
                       onCreate={createQuestion}
                       onUpdate={updateQuestion}
+                      onDelete={deleteQuestion}
                     />
                   )}
                 </aside>
@@ -1136,6 +1159,7 @@ function CoachModal({
 }
 
 function QuestionsDrawer({
+  viewer,
   role,
   comments,
   draftComment,
@@ -1146,7 +1170,9 @@ function QuestionsDrawer({
   onVisibilityChange,
   onCreate,
   onUpdate,
+  onDelete,
 }: {
+  viewer: Viewer;
   role: Role;
   comments: SectionComment[];
   draftComment: string;
@@ -1157,10 +1183,14 @@ function QuestionsDrawer({
   onVisibilityChange: (value: Visibility) => void;
   onCreate: () => void;
   onUpdate: (comment: SectionComment, updates: Partial<SectionComment>) => void;
+  onDelete: (commentId: string) => Promise<void>;
 }) {
   return (
     <div>
       <DrawerHeader title="Questions" onClose={onClose} />
+      <p className="mb-3 text-xs text-[#68716b]">
+        Signed in as {viewer.label || roleLabels[role]}
+      </p>
       <label className="text-sm font-semibold">
         Add question or comment
         <textarea
@@ -1196,20 +1226,35 @@ function QuestionsDrawer({
           comments.map((comment) => (
             <div className="rounded-lg border border-[#d8d6cf] bg-white p-3" key={comment.id}>
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <p className="text-xs font-semibold uppercase text-[#68716b]">
-                  {roleLabels[comment.role]} · {comment.visibility}
-                </p>
-                <select
-                  className="rounded-md border border-[#c9c6be] bg-white px-2 py-1 text-xs"
-                  value={comment.status}
-                  onChange={(event) =>
-                    onUpdate(comment, { status: event.target.value as CommentStatus })
-                  }
-                >
-                  <option>Open</option>
-                  <option>Acknowledged</option>
-                  <option>Resolved</option>
-                </select>
+                <div>
+                  <p className="text-xs font-semibold uppercase text-[#68716b]">
+                    {roleLabels[comment.role]} · {comment.visibility}
+                  </p>
+                  <p className="mt-1 text-sm text-[#48514b]">{comment.author}</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <select
+                    className="rounded-md border border-[#c9c6be] bg-white px-2 py-1 text-xs"
+                    value={comment.status}
+                    onChange={(event) =>
+                      onUpdate(comment, { status: event.target.value as CommentStatus })
+                    }
+                  >
+                    <option>Open</option>
+                    <option>Acknowledged</option>
+                    <option>Resolved</option>
+                  </select>
+                  {comment.canDelete ? (
+                    <button
+                      aria-label="Delete question"
+                      className="rounded-md border border-[#c9c6be] px-2 py-1 text-sm font-semibold hover:bg-[#f2f1ec]"
+                      disabled={saving}
+                      onClick={() => void onDelete(comment.id)}
+                    >
+                      x
+                    </button>
+                  ) : null}
+                </div>
               </div>
               <p className="mt-2 whitespace-pre-wrap text-sm leading-6">{comment.body}</p>
               {role === "business" ? (
