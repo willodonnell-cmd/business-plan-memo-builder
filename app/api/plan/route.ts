@@ -53,7 +53,9 @@ const seedSections = [
 ];
 
 type Role = "business" | "enablement" | "approver";
-type Visibility = "Public" | "Draft" | "Private";
+type Visibility = "Public" | "Draft" | "Team only";
+type PlanStatus = "Draft" | "Ready for review";
+type ApprovalPosture = "Ready for review" | "Open question" | "Approved";
 
 type ViewerIdentity = {
   email: string;
@@ -75,7 +77,7 @@ function isRole(value: string | null): value is Role {
 }
 
 function isVisibility(value: unknown): value is Visibility {
-  return value === "Public" || value === "Draft" || value === "Private";
+  return value === "Public" || value === "Draft" || value === "Team only";
 }
 
 function roleAuthor(role: Role) {
@@ -92,11 +94,31 @@ function getViewerIdentity(request: Request, role: Role): ViewerIdentity {
   };
 }
 
+function canDeleteComment(comment: { author: string }, viewer: ViewerIdentity) {
+  return comment.author === viewer.label || (!!viewer.email && comment.author === viewer.email);
+}
+
+function normalizePlanStatus(status: string | null | undefined): PlanStatus {
+  return status === "Ready for review" ? "Ready for review" : "Draft";
+}
+
+function normalizePosture(posture: string): ApprovalPosture {
+  if (posture === "Approved") return "Approved";
+  if (posture === "Open question" || posture === "Needs clarification") return "Open question";
+  if (posture === "Ready for review" || posture === "Ready") return "Ready for review";
+  return "Ready for review";
+}
+
+function isApprovalPosture(value: string): value is ApprovalPosture {
+  return value === "Ready for review" || value === "Open question" || value === "Approved";
+}
+
 function visibleCommentFilter(role: Role, viewer: ViewerIdentity) {
   if (role === "business") {
+    // Business sees: Public questions and Team only questions (not Draft from others)
     return or(
       eq(sectionComments.visibility, "Public"),
-      eq(sectionComments.visibility, "Private"),
+      eq(sectionComments.visibility, "Team only"),
       and(
         eq(sectionComments.visibility, "Draft"),
         eq(sectionComments.author, viewer.label),
@@ -104,11 +126,13 @@ function visibleCommentFilter(role: Role, viewer: ViewerIdentity) {
     );
   }
 
+  // Enablement/Approver see: Public, their own Drafts, all Team only
   return or(
     eq(sectionComments.visibility, "Public"),
+    eq(sectionComments.visibility, "Team only"),
     and(
       or(eq(sectionComments.author, viewer.email), eq(sectionComments.author, viewer.label)),
-      inArray(sectionComments.visibility, ["Draft", "Private"]),
+      eq(sectionComments.visibility, "Draft"),
     ),
   );
 }
@@ -172,13 +196,21 @@ export async function GET(request: Request) {
       .where(eq(approvalPostures.planId, PLAN_ID));
 
     return Response.json({
-      plan,
+      plan: plan
+        ? {
+            ...plan,
+            planStatus: normalizePlanStatus(plan.planStatus),
+          }
+        : plan,
       sections,
       comments: comments.map((comment) => ({
         ...comment,
-        canDelete: role === "business" || (!!viewer.email && comment.author === viewer.email),
+        canDelete: canDeleteComment(comment, viewer),
       })),
-      approvals,
+      approvals: approvals.map((approval) => ({
+        ...approval,
+        posture: normalizePosture(approval.posture),
+      })),
       viewer,
     });
   } catch (error) {
@@ -259,14 +291,14 @@ export async function POST(request: Request) {
       const status = String(payload.status ?? "Open");
       const response = String(payload.response ?? "");
 
-      if (!["Open", "Acknowledged", "Resolved"].includes(status)) {
+      if (!["Open", "Resolved"].includes(status)) {
         return Response.json({ error: "Invalid question status" }, { status: 400 });
       }
 
       await db
         .update(sectionComments)
         .set({
-          status: status as "Open" | "Acknowledged" | "Resolved",
+          status: status as "Open" | "Resolved",
           response,
           updatedAt: sql`CURRENT_TIMESTAMP`,
         })
@@ -288,10 +320,7 @@ export async function POST(request: Request) {
         return Response.json({ error: "Question not found" }, { status: 404 });
       }
 
-      const canDelete =
-        role === "business" || (!!viewer.email && comment.author === viewer.email);
-
-      if (!canDelete) {
+      if (!canDeleteComment(comment, viewer)) {
         return Response.json({ error: "You do not have permission to delete this question" }, { status: 403 });
       }
 
@@ -299,29 +328,51 @@ export async function POST(request: Request) {
       return Response.json({ ok: true });
     }
 
-    if (action === "save-approval") {
-      const sectionId = String(payload.sectionId ?? "");
-      const approver = String(payload.approver ?? "").trim() || "Approver";
-      const posture = String(payload.posture ?? "Needs clarification");
+    if (action === "submit-plan") {
+      if (role !== "business") {
+        return Response.json({ error: "Only the business team can submit the plan" }, { status: 403 });
+      }
 
-      if (!["Needs clarification", "Ready", "Approved"].includes(posture)) {
+      await db
+        .update(businessPlans)
+        .set({ planStatus: "Ready for review", updatedAt: sql`CURRENT_TIMESTAMP` })
+        .where(eq(businessPlans.id, PLAN_ID));
+
+      return Response.json({ ok: true });
+    }
+
+    if (action === "save-approval") {
+      const approver = String(payload.approver ?? "").trim() || "Approver";
+      const posture = String(payload.posture ?? "Ready for review");
+
+      if (!isApprovalPosture(posture)) {
         return Response.json({ error: "Invalid approval posture" }, { status: 400 });
       }
 
-      const id = `${PLAN_ID}:${sectionId}:${approver}`;
+      const [plan] = await db
+        .select({ planStatus: businessPlans.planStatus })
+        .from(businessPlans)
+        .where(eq(businessPlans.id, PLAN_ID))
+        .limit(1);
+
+      if (normalizePlanStatus(plan?.planStatus) !== "Ready for review") {
+        return Response.json({ error: "Plan has not been submitted for review" }, { status: 400 });
+      }
+
+      const id = `${PLAN_ID}:plan:${approver}`;
       await db
         .insert(approvalPostures)
         .values({
           id,
           planId: PLAN_ID,
-          sectionId,
+          sectionId: null,
           approver,
-          posture: posture as "Needs clarification" | "Ready" | "Approved",
+          posture,
         })
         .onConflictDoUpdate({
           target: approvalPostures.id,
           set: {
-            posture: posture as "Needs clarification" | "Ready" | "Approved",
+            posture,
             updatedAt: sql`CURRENT_TIMESTAMP`,
           },
         });

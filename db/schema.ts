@@ -5,6 +5,9 @@ export const businessPlans = sqliteTable("business_plans", {
   id: text("id").primaryKey(),
   title: text("title").notNull(),
   teamName: text("team_name").notNull().default("Team"),
+  planStatus: text("plan_status", { enum: ["Draft", "Ready for review"] })
+    .notNull()
+    .default("Draft"),
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
   updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 });
@@ -39,7 +42,7 @@ export const sectionComments = sqliteTable("section_comments", {
     enum: ["Public", "Draft", "Private"],
   }).notNull(),
   status: text("status", {
-    enum: ["Open", "Acknowledged", "Resolved"],
+    enum: ["Open", "Resolved"],
   })
     .notNull()
     .default("Open"),
@@ -56,7 +59,7 @@ export const approvalPostures = sqliteTable("approval_postures", {
   sectionId: text("section_id").references(() => memoSections.id),
   approver: text("approver").notNull(),
   posture: text("posture", {
-    enum: ["Needs clarification", "Ready", "Approved"],
+    enum: ["Ready for review", "Open question", "Approved"],
   }).notNull(),
   updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 });
