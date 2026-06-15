@@ -1,4 +1,4 @@
-CREATE TABLE `approvers` (
+CREATE TABLE IF NOT EXISTS `approvers` (
 	`id` text PRIMARY KEY NOT NULL,
 	`plan_id` text NOT NULL,
 	`name` text NOT NULL,
@@ -8,7 +8,7 @@ CREATE TABLE `approvers` (
 	FOREIGN KEY (`plan_id`) REFERENCES `business_plans`(`id`) ON UPDATE no action ON DELETE cascade
 );
 --> statement-breakpoint
-CREATE TABLE `business_plans` (
+CREATE TABLE IF NOT EXISTS `business_plans` (
 	`id` text PRIMARY KEY NOT NULL,
 	`title` text NOT NULL,
 	`team_name` text NOT NULL,
@@ -18,7 +18,7 @@ CREATE TABLE `business_plans` (
 	`updated_at` integer NOT NULL
 );
 --> statement-breakpoint
-CREATE TABLE `memo_sections` (
+CREATE TABLE IF NOT EXISTS `memo_sections` (
 	`id` text PRIMARY KEY NOT NULL,
 	`plan_id` text NOT NULL,
 	`section_key` text NOT NULL,
@@ -30,7 +30,7 @@ CREATE TABLE `memo_sections` (
 	FOREIGN KEY (`plan_id`) REFERENCES `business_plans`(`id`) ON UPDATE no action ON DELETE cascade
 );
 --> statement-breakpoint
-CREATE TABLE `section_questions` (
+CREATE TABLE IF NOT EXISTS `section_questions` (
 	`id` text PRIMARY KEY NOT NULL,
 	`plan_id` text NOT NULL,
 	`section_id` text NOT NULL,
@@ -38,6 +38,8 @@ CREATE TABLE `section_questions` (
 	`author_role` text NOT NULL,
 	`visibility` text DEFAULT 'Public' NOT NULL,
 	`status` text DEFAULT 'Open' NOT NULL,
+	`issue_type` text DEFAULT 'Clarification' NOT NULL,
+	`function_name` text DEFAULT '' NOT NULL,
 	`body` text NOT NULL,
 	`response` text,
 	`created_at` integer NOT NULL,
