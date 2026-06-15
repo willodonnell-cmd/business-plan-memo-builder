@@ -13,9 +13,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "2027 Business Plan Memo Builder",
-  description:
-    "A focused workspace for drafting, brainstorming, reviewing, and approving 2027 business plan memos.",
+  title: "Prologis 2027 Business Plan Workspace",
+  description: "Internal workspace for drafting, reviewing, approving, and exporting 2027 business plan memos.",
   icons: {
     icon: "/favicon.svg",
     shortcut: "/favicon.svg",
