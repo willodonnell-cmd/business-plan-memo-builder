@@ -1,13 +1,3 @@
-CREATE TABLE IF NOT EXISTS `approvers` (
-	`id` text PRIMARY KEY NOT NULL,
-	`plan_id` text NOT NULL,
-	`name` text NOT NULL,
-	`title` text NOT NULL,
-	`posture` text DEFAULT 'Reviewing' NOT NULL,
-	`updated_at` integer NOT NULL,
-	FOREIGN KEY (`plan_id`) REFERENCES `business_plans`(`id`) ON UPDATE no action ON DELETE cascade
-);
---> statement-breakpoint
 CREATE TABLE IF NOT EXISTS `business_plans` (
 	`id` text PRIMARY KEY NOT NULL,
 	`title` text NOT NULL,
@@ -16,6 +6,16 @@ CREATE TABLE IF NOT EXISTS `business_plans` (
 	`approval_posture` text DEFAULT 'Drafting' NOT NULL,
 	`created_by` text,
 	`updated_at` integer NOT NULL
+);
+--> statement-breakpoint
+CREATE TABLE IF NOT EXISTS `approvers` (
+	`id` text PRIMARY KEY NOT NULL,
+	`plan_id` text NOT NULL,
+	`name` text NOT NULL,
+	`title` text NOT NULL,
+	`posture` text DEFAULT 'Reviewing' NOT NULL,
+	`updated_at` integer NOT NULL,
+	FOREIGN KEY (`plan_id`) REFERENCES `business_plans`(`id`) ON UPDATE no action ON DELETE cascade
 );
 --> statement-breakpoint
 CREATE TABLE IF NOT EXISTS `memo_sections` (
