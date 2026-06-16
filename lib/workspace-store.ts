@@ -352,6 +352,8 @@ async function ensureSchema(d1: D1Database) {
     await d1.prepare(statement).run();
   }
 
+  await addColumnIfMissing(d1, "business_plans", "approval_state", "text DEFAULT 'Draft' NOT NULL");
+  await addColumnIfMissing(d1, "business_plans", "approval_posture", "text DEFAULT 'Drafting' NOT NULL");
   await addColumnIfMissing(d1, "section_questions", "issue_type", "text DEFAULT 'Clarification' NOT NULL");
   await addColumnIfMissing(d1, "section_questions", "function_name", "text DEFAULT '' NOT NULL");
 }
