@@ -251,8 +251,10 @@ export default function Home() {
       try {
         const nextPlan = await requestPlan("/api/plan");
         if (!cancelled) applyPlan(nextPlan, "Loaded");
-      } catch {
-        if (!cancelled) setMessage("Could not load workspace. Apply the local D1 migration and retry.");
+      } catch (error) {
+        if (!cancelled) {
+          setMessage(error instanceof Error ? error.message : "Could not load workspace.");
+        }
       }
     }
 
