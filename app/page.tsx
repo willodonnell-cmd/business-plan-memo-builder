@@ -498,17 +498,11 @@ export default function Home() {
           <div className={`full-memo-layout full-memo-layout-${role.toLowerCase().replace(/\s+/g, "-")}`}>
             <FullMemo
               sections={sections}
-              questions={questions}
               title={planTitle}
               role={role}
               visibleApprovers={role === "Approver" ? visibleApprovers : approvers}
               approvalConcerns={approvalConcerns}
               activeQuestionSectionId={questionTargetSection?.id ?? ""}
-              onQuestions={(id) => {
-                setActiveId(id);
-                setQuestionSectionId(id);
-                setQuestionsOpen(true);
-              }}
             />
             <aside className="full-memo-sidebar">
               {role === "Approver" ? (
@@ -941,22 +935,18 @@ function QuestionList({
 
 function FullMemo({
   sections,
-  questions,
   title,
   role,
   visibleApprovers,
   approvalConcerns,
   activeQuestionSectionId,
-  onQuestions,
 }: {
   sections: MemoSection[];
-  questions: Question[];
   title: string;
   role: WorkspaceRole;
   visibleApprovers: Approver[];
   approvalConcerns: number;
   activeQuestionSectionId: string;
-  onQuestions: (id: string) => void;
 }) {
   const askSection = sections.find((section) => section.title === "Bottom-Line Ask");
   const visibleApprovedCount = visibleApprovers.filter((approver) => normalizeApproverPosture(approver.posture) === "Approved").length;
@@ -980,7 +970,6 @@ function FullMemo({
         ) : null}
       </div>
       {sections.map((section, index) => {
-        const count = questions.filter((question) => question.sectionId === section.id && question.status !== "Resolved").length;
         return (
           <section
             key={section.id}
@@ -991,11 +980,6 @@ function FullMemo({
                 <p className="eyebrow">Section {index + 1}</p>
                 <h3>{section.title}</h3>
               </div>
-              {role === "Enablement" ? null : (
-                <button className="toolbar-button" onClick={() => onQuestions(section.id)}>
-                  Questions{count ? ` (${count})` : ""}
-                </button>
-              )}
             </div>
             <div className="memo-box">{section.content || "Draft content pending."}</div>
           </section>
