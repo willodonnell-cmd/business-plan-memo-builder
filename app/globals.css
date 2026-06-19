@@ -69,7 +69,6 @@ textarea:focus {
 .section-shell,
 .full-memo-card,
 .question-drawer,
-.approval-panel,
 .modal-card {
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -103,7 +102,6 @@ textarea:focus {
   font-size: 0.86rem;
 }
 
-.edit-title,
 .icon-button {
   display: grid;
   width: 34px;
@@ -120,17 +118,39 @@ textarea:focus {
   background: #fffdf8;
 }
 
-.title-edit {
-  display: grid;
-  grid-template-columns: minmax(180px, 360px) 38px;
-  gap: 8px;
+.plan-meta-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-top: 8px;
 }
 
-.title-input {
-  min-height: 38px;
-  padding: 0 12px;
-  font-size: 1.25rem;
+.plan-selector {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.plan-selector span,
+.plan-meta-row .site-subtitle {
+  color: var(--muted);
+  font-size: 0.52rem;
   font-weight: 700;
+  letter-spacing: 0.05em;
+  line-height: 1.2;
+  text-transform: uppercase;
+}
+
+.plan-selector select {
+  min-height: 28px;
+  padding: 0 8px;
+  font-size: 0.78rem;
+}
+
+.plan-meta-row .site-subtitle {
+  margin: 0;
 }
 
 .role-switcher,
@@ -197,7 +217,7 @@ textarea:focus {
 
 .toolbar-button:hover,
 .icon-button:hover,
-.edit-title:hover {
+.plan-selector select:hover {
   border-color: #bfb8aa;
   background: #f4f1e9;
 }
@@ -271,7 +291,6 @@ textarea:focus {
   font-size: 0.88rem;
 }
 
-.review-chip,
 .save-state {
   display: inline-flex;
   min-height: 28px;
@@ -280,12 +299,6 @@ textarea:focus {
   padding: 0 10px;
   font-size: 0.8rem;
   font-weight: 700;
-}
-
-.review-chip {
-  border: 1px solid #cce6d4;
-  background: #edf8ef;
-  color: var(--green-dark);
 }
 
 .save-state {
@@ -402,29 +415,6 @@ textarea:focus {
   padding: 16px;
   line-height: 1.6;
   font-size: 0.98rem;
-}
-
-.length-panel {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-bottom: 14px;
-  color: #5f5b52;
-  font-size: 0.82rem;
-}
-
-.length-panel span,
-.length-panel b {
-  border: 1px solid #e2ddd2;
-  border-radius: 999px;
-  background: #fffaf1;
-  padding: 5px 10px;
-}
-
-.length-panel-warn b {
-  border-color: #e4b48c;
-  background: #fff0e2;
-  color: #8a4b17;
 }
 
 .memo-read {
@@ -619,6 +609,38 @@ textarea:focus {
   gap: 14px;
 }
 
+.approver-mode-card {
+  border: 1px solid #d7d0c2;
+  border-radius: 8px;
+  background: #fffdf8;
+  padding: 12px;
+}
+
+.approver-mode-card label {
+  display: grid;
+  gap: 7px;
+}
+
+.approver-mode-card span {
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.approver-mode-card select {
+  min-height: 34px;
+  padding: 0 10px;
+}
+
+.approver-mode-card small {
+  display: block;
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
 .question-composer {
   border: 1px solid #d9d2c5;
   border-radius: 8px;
@@ -629,23 +651,26 @@ textarea:focus {
 
 .question-composer textarea,
 .question-composer select,
-.response-editor textarea,
-.approver-card input,
-.approver-card select {
+.response-editor textarea {
   width: 100%;
 }
 
 .question-composer textarea {
-  min-height: 96px;
-  margin-top: 14px;
+  min-height: 72px;
+  margin-top: 10px;
   padding: 12px;
 }
 
-.question-composer select,
-.approver-card select,
-.approver-card input {
+.question-composer select {
   min-height: 38px;
   padding: 0 10px;
+}
+
+.question-submit-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  margin-top: 10px;
 }
 
 .send-button {
@@ -655,6 +680,13 @@ textarea:focus {
   background: linear-gradient(180deg, #3a7553, #2e6146);
   color: white;
   font-weight: 700;
+  padding: 0 14px;
+}
+
+.question-list {
+  display: grid;
+  gap: 9px;
+  margin-top: 12px;
 }
 
 .question-card {
@@ -669,9 +701,9 @@ textarea:focus {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   border-bottom: 1px solid #eee9df;
-  padding: 12px;
+  padding: 9px 10px;
 }
 
 .question-card-head select {
@@ -708,7 +740,7 @@ textarea:focus {
 }
 
 .question-body {
-  padding: 16px;
+  padding: 10px 12px;
   line-height: 1.6;
 }
 
@@ -716,13 +748,20 @@ textarea:focus {
 .response-read {
   border-top: 1px solid #eee9df;
   background: #f2f8f1;
-  padding: 14px;
+  padding: 10px 12px;
 }
 
 .response-editor textarea {
-  min-height: 80px;
-  margin: 10px 0;
+  min-height: 68px;
+  margin: 8px 0;
   padding: 10px;
+}
+
+.response-empty {
+  border-top: 1px solid #eee9df;
+  padding: 8px 12px 10px;
+  color: var(--muted);
+  font-size: 0.82rem;
 }
 
 .delete-question {
@@ -737,7 +776,7 @@ textarea:focus {
 .empty-note {
   border: 1px dashed var(--line);
   border-radius: 8px;
-  padding: 18px;
+  padding: 12px;
   color: var(--muted);
 }
 
@@ -872,99 +911,6 @@ textarea:focus {
   line-height: 1.6;
   font-size: 0.98rem;
   color: #24231f;
-}
-
-.approval-collapsed,
-.approval-panel {
-  width: 100%;
-  margin-top: 18px;
-}
-
-.approval-collapsed,
-.approval-panel-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: #fffdf8;
-  padding: 14px 16px;
-  text-align: left;
-}
-
-.approval-collapsed small,
-.approval-panel-head small {
-  display: block;
-  margin-top: 6px;
-  color: var(--muted);
-}
-
-.approval-collapsed b,
-.approval-panel-head b {
-  color: var(--green-dark);
-}
-
-.approval-panel {
-  overflow: hidden;
-}
-
-.approval-panel-compact {
-  margin-top: 0;
-}
-
-.approval-panel-compact .approval-panel-head {
-  cursor: default;
-}
-
-.approval-panel-compact .approval-panel-head b {
-  display: none;
-}
-
-.approval-panel-compact .approval-grid {
-  grid-template-columns: 1fr;
-}
-
-.approval-panel-head {
-  width: 100%;
-  border: 0;
-  border-radius: 0;
-  border-bottom: 1px solid var(--line);
-}
-
-.approval-panel-head strong {
-  font-size: 0.98rem;
-}
-
-.approval-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: 12px;
-  padding: 14px;
-}
-
-.approver-card {
-  display: grid;
-  gap: 8px;
-  border: 1px solid #eee9df;
-  border-radius: 8px;
-  background: #fffef9;
-  padding: 10px 12px;
-}
-
-.approver-card .font-bold {
-  font-size: 0.92rem;
-}
-
-.approver-card input,
-.approver-card select {
-  min-height: 34px;
-  font-size: 0.9rem;
-}
-
-.approver-card .toolbar-button,
-.approver-card .primary-button {
-  min-height: 32px;
 }
 
 .modal-card {
@@ -1113,10 +1059,6 @@ textarea:focus {
     max-width: none;
   }
 
-  .title-edit {
-    grid-template-columns: minmax(0, 1fr) 38px;
-  }
-
   .section-header,
   .editor-pane,
   .right-rail,
@@ -1156,17 +1098,6 @@ textarea:focus {
   .question-card-head select {
     margin-left: 0;
     width: 100%;
-  }
-
-  .approval-collapsed,
-  .approval-panel-head {
-    align-items: flex-start;
-  }
-
-  .approval-panel-compact {
-    position: sticky;
-    top: 0;
-    z-index: 5;
   }
 
   .workflow-strip {

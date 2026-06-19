@@ -34,12 +34,18 @@ const issueTypes: IssueType[] = [
   "Approval Concern",
 ];
 const enablementFunctions: EnablementFunction[] = ["Legal", "HR", "Marketing", "IT", "Customer Account Management", "Other"];
-const approverPostures = ["Approved", "Approved with Conditions", "Needs Revision", "Not Approved"];
+const approverPostures = ["Questions", "Approved"];
+const BUSINESS_PLAN_OPTIONS = [
+  "Essentials",
+  "Prologis Energy Solutions",
+  "Data Center",
+  "Strategic Capital",
+  "Ventures",
+] as const;
 const emptySections: MemoSection[] = [];
 const emptyQuestions: Question[] = [];
 const emptyApprovers: Approver[] = [];
 const currentUserEmail = "wodonnell@prologis.com";
-const adminEmail = "wodonnell@prologis.com";
 
 export default function Home() {
   const [plan, setPlan] = useState<WorkspacePlan | null>(null);
@@ -47,43 +53,37 @@ export default function Home() {
   const [mode, setMode] = useState<Mode>("Section");
   const [activeId, setActiveId] = useState("");
   const [teamName, setTeamName] = useState("");
-  const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [showGuidance, setShowGuidance] = useState(true);
   const [showCoach, setShowCoach] = useState(false);
   const [showHowTo, setShowHowTo] = useState(false);
   const [questionsOpen, setQuestionsOpen] = useState(false);
-  const [approvalOpen, setApprovalOpen] = useState(false);
   const [questionDraft, setQuestionDraft] = useState("");
   const [visibility, setVisibility] = useState<Visibility>("Public");
   const [issueType, setIssueType] = useState<IssueType>("Clarification");
   const [enablementFunction, setEnablementFunction] = useState<EnablementFunction>("Legal");
   const [responseDrafts, setResponseDrafts] = useState<Record<string, string>>({});
-  const [approverDrafts, setApproverDrafts] = useState<Record<string, string>>({});
-  const [newApproverName, setNewApproverName] = useState("");
-  const [newApproverTitle, setNewApproverTitle] = useState("");
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const [message, setMessage] = useState("Loading workspace...");
 
   const sections = plan?.sections ?? emptySections;
   const questions = plan?.questions ?? emptyQuestions;
   const approvers = plan?.approvers ?? emptyApprovers;
-  const canManageApprovers = currentUserEmail === adminEmail;
   const activeSection = sections.find((section) => section.id === activeId) ?? sections[0] ?? null;
   const planTitle = plan?.title ?? "2027 Essentials Business Plan";
   const openQuestions = questions.filter((question) => question.status !== "Resolved").length;
   const approvedCount = approvers.filter((approver) => approver.posture === "Approved").length;
   const sectionIndex = activeSection ? sections.findIndex((section) => section.id === activeSection.id) + 1 : 1;
   const inReviewCount = sections.filter((section) => section.status !== "Draft").length;
-  const wordCount = useMemo(() => countWords(sections.map((section) => section.content).join(" ")), [sections]);
-  const estimatedPages = Math.max(1, Math.ceil(wordCount / 550));
   const openDependencies = questions.filter(
     (question) =>
       question.status !== "Resolved" &&
       ["Functional Dependency", "Support Need", "Required Input"].includes(question.issueType),
   ).length;
-  const approvalConcerns = questions.filter(
-    (question) => question.status !== "Resolved" && question.issueType === "Approval Concern",
-  ).length;
+  const currentApprover = approvers[0] ?? null;
+  const currentApproverMode = currentApprover?.posture === "Approved" ? "Approved" : "Questions";
+  const selectedBusinessPlan = BUSINESS_PLAN_OPTIONS.includes(teamName as (typeof BUSINESS_PLAN_OPTIONS)[number])
+    ? teamName
+    : "Essentials";
 
   const visibleQuestions = useMemo(() => {
     if (!activeSection) return [];
@@ -127,7 +127,6 @@ export default function Home() {
     setTeamName(nextPlan.teamName);
     setActiveId((current) => current || nextPlan.sections[0]?.id || "");
     setResponseDrafts(Object.fromEntries(nextPlan.questions.map((question) => [question.id, question.response])));
-    setApproverDrafts(Object.fromEntries(nextPlan.approvers.map((approver) => [approver.id, approver.posture])));
     setSaveState("saved");
     setMessage(nextMessage);
   }
@@ -183,29 +182,19 @@ export default function Home() {
     applyPlan(nextPlan, "Question deleted");
   }
 
-  async function saveApprover(approver: Approver) {
-    const posture = approverDrafts[approver.id] ?? approver.posture;
-    const nextPlan = await requestPlan(`/api/approvers/${encodeURIComponent(approver.id)}`, {
+  async function changePlanSelection(nextTeamName: string) {
+    setTeamName(nextTeamName);
+    await savePlan({ teamName: nextTeamName });
+  }
+
+  async function changeApproverMode(value: string) {
+    if (!currentApprover) return;
+    const posture = value === "Approved" ? "Approved" : "Questions";
+    const nextPlan = await requestPlan(`/api/approvers/${encodeURIComponent(currentApprover.id)}`, {
       method: "PATCH",
       body: JSON.stringify({ posture }),
     });
-    applyPlan(nextPlan, "Approval saved");
-  }
-
-  async function addApprover() {
-    if (!newApproverName.trim()) return;
-    const nextPlan = await requestPlan("/api/approvers", {
-      method: "POST",
-      body: JSON.stringify({
-        name: newApproverName.trim(),
-        title: newApproverTitle.trim() || "Approver",
-        posture: "Needs Revision",
-        requesterEmail: currentUserEmail,
-      }),
-    });
-    setNewApproverName("");
-    setNewApproverTitle("");
-    applyPlan(nextPlan, "Approver added");
+    applyPlan(nextPlan, posture === "Approved" ? "Approval saved" : "Question mode saved");
   }
 
   function updateSectionContent(id: string, content: string) {
@@ -221,10 +210,6 @@ export default function Home() {
     );
   }
 
-  function updateApproverDraft(id: string, posture: string) {
-    setApproverDrafts((current) => ({ ...current, [id]: posture }));
-  }
-
   function canDelete(question: Question) {
     return role === "Business Team" || question.role === role;
   }
@@ -237,7 +222,7 @@ export default function Home() {
       return;
     }
     setMode("Full Memo");
-    setQuestionsOpen(nextRole === "Enablement");
+    setQuestionsOpen(nextRole === "Enablement" || nextRole === "Approver");
     setIssueType(nextRole === "Approver" ? "Approval Concern" : "Functional Dependency");
   }
 
@@ -284,35 +269,19 @@ export default function Home() {
             <div className="brand-mark" aria-hidden="true">▤</div>
             <div className="min-w-0">
               <div className="flex min-w-0 items-center gap-2">
-                {isEditingTitle ? (
-                  <div className="title-edit">
-                    <input
-                      className="title-input"
-                      value={teamName}
-                      onChange={(event) => setTeamName(event.target.value)}
-                      placeholder="Essentials"
-                    />
-                    <button
-                      className="icon-button"
-                      title="Save plan name"
-                      onClick={() => {
-                        setIsEditingTitle(false);
-                        void savePlan({ teamName });
-                      }}
-                    >
-                      ✓
-                    </button>
-                  </div>
-                ) : (
-                  <>
-                    <h1 className="site-title truncate font-bold tracking-0">{planTitle}</h1>
-                    <button className="edit-title" title="Edit plan name" onClick={() => setIsEditingTitle(true)}>
-                      ✎
-                    </button>
-                  </>
-                )}
+                <h1 className="site-title truncate font-bold tracking-0">{planTitle}</h1>
               </div>
-              <p className="site-subtitle mt-1 text-[#756f64]">Four-page strategic business plan memo workspace</p>
+              <div className="plan-meta-row">
+                <label className="plan-selector">
+                  <span>Business plan view</span>
+                  <select value={selectedBusinessPlan} onChange={(event) => void changePlanSelection(event.target.value)}>
+                    {BUSINESS_PLAN_OPTIONS.map((option) => (
+                      <option key={option} value={option}>{option}</option>
+                    ))}
+                  </select>
+                </label>
+                <p className="site-subtitle text-[#756f64]">Strategic business plan memo workspace</p>
+              </div>
             </div>
           </div>
 
@@ -358,10 +327,6 @@ export default function Home() {
           <div className="workflow-metrics">
             <Metric label="Memo approval" value={`${approvedCount}/${approvers.length || 0} approved`} />
             <Metric label="Questions" value={`${openQuestions} open`} />
-            <Metric label="Length" value={`${estimatedPages} pg · ${wordCount} words`} />
-            <span className="review-chip">
-              {sections.every((section) => section.status !== "Draft") ? "Enablement read" : "Draft plan"}
-            </span>
             {saveState !== "idle" ? <span className={`save-state save-state-${saveState}`}>{message}</span> : null}
           </div>
         </div>
@@ -386,7 +351,6 @@ export default function Home() {
 
               <div className="section-editor-layout">
                 <div className="editor-pane">
-                  <LengthPanel estimatedPages={estimatedPages} />
                   <div className="mb-3 flex items-center justify-between gap-3">
                     <div className="flex flex-wrap gap-2">
                       {sectionReadinessStatuses.map((status) => (
@@ -477,9 +441,7 @@ export default function Home() {
               questions={questions}
               title={planTitle}
               role={role}
-              approvers={approvers}
               openDependencies={openDependencies}
-              approvalConcerns={approvalConcerns}
               onQuestions={(id) => {
                 setActiveId(id);
                 setQuestionsOpen(true);
@@ -488,28 +450,11 @@ export default function Home() {
             <aside className="full-memo-sidebar">
               {role === "Approver" ? (
                 <>
-                  <ApprovalPanel
-                    approvers={approvers}
+                  <ApproverModeControl
+                    value={currentApproverMode}
                     approvedCount={approvedCount}
-                    approverDrafts={approverDrafts}
-                    newApproverName={newApproverName}
-                    newApproverTitle={newApproverTitle}
-                    setNewApproverName={setNewApproverName}
-                    setNewApproverTitle={setNewApproverTitle}
-                    updateApproverDraft={updateApproverDraft}
-                    saveApprover={saveApprover}
-                    addApprover={addApprover}
-                    canManageApprovers={canManageApprovers}
-                    open
-                    setOpen={setApprovalOpen}
-                    compact
-                  />
-                  <IssueSummary
-                    questions={allVisibleQuestions}
-                    onInspect={(sectionId) => {
-                      setActiveId(sectionId);
-                      setQuestionsOpen(true);
-                    }}
+                    totalApprovers={approvers.length}
+                    onChange={changeApproverMode}
                   />
                   {questionsOpen ? (
                     <QuestionDrawer
@@ -588,31 +533,6 @@ export default function Home() {
           </div>
         )}
 
-        {role !== "Approver" && approvalOpen ? (
-          <ApprovalPanel
-            approvers={approvers}
-            approvedCount={approvedCount}
-            approverDrafts={approverDrafts}
-            newApproverName={newApproverName}
-            newApproverTitle={newApproverTitle}
-            setNewApproverName={setNewApproverName}
-            setNewApproverTitle={setNewApproverTitle}
-            updateApproverDraft={updateApproverDraft}
-            saveApprover={saveApprover}
-            addApprover={addApprover}
-            canManageApprovers={canManageApprovers}
-            open={approvalOpen}
-            setOpen={setApprovalOpen}
-          />
-        ) : role !== "Approver" ? (
-          <button className="approval-collapsed" onClick={() => setApprovalOpen(true)}>
-            <span>
-              <strong>Plan approval</strong>
-              <small>{approvedCount}/{approvers.length || 0} approved · executive approval is separate from enablement review</small>
-            </span>
-            <b>Show</b>
-          </button>
-        ) : null}
       </section>
 
       <div className="hidden print:block">
@@ -665,19 +585,6 @@ function roleFocus(role: Role) {
     label: "Executive Approval",
     body: "Review the formatted memo, inspect unresolved concerns only as needed, and set individual approver posture separately from the plan lifecycle.",
   };
-}
-
-function LengthPanel({
-  estimatedPages,
-}: {
-  estimatedPages: number;
-}) {
-  if (estimatedPages <= 4) return null;
-  return (
-    <div className="length-panel length-panel-warn">
-      <b>Likely over four pages. Consider using GPT Coach to tighten without removing important facts.</b>
-    </div>
-  );
 }
 
 function MemoOutline({
@@ -766,6 +673,32 @@ function QuestionDrawer(props: QuestionPanelProps & { onClose: () => void }) {
   );
 }
 
+function ApproverModeControl({
+  value,
+  approvedCount,
+  totalApprovers,
+  onChange,
+}: {
+  value: string;
+  approvedCount: number;
+  totalApprovers: number;
+  onChange: (value: string) => Promise<void>;
+}) {
+  return (
+    <section className="approver-mode-card">
+      <label>
+        <span>Approver mode</span>
+        <select value={value} onChange={(event) => void onChange(event.target.value)}>
+          {approverPostures.map((posture) => (
+            <option key={posture}>{posture}</option>
+          ))}
+        </select>
+      </label>
+      <small>{approvedCount}/{totalApprovers || 0} approved</small>
+    </section>
+  );
+}
+
 type QuestionPanelProps = {
   role: Role;
   questions: Question[];
@@ -820,13 +753,13 @@ function QuestionComposer({
           </select>
         ) : null}
       </div>
-      <div className="mt-3 grid grid-cols-[minmax(0,1fr)_38px] gap-2">
+      <div className="question-submit-row">
         <select value={visibility} onChange={(event) => setVisibility(event.target.value as Visibility)}>
           <option value="Public">Public — everyone sees this</option>
           <option value="Private">Team only — enablement + business</option>
           <option value="Draft">Draft — only you</option>
         </select>
-        <button className="send-button" title={`Ask as ${role}`} onClick={() => void addQuestion()}>▷</button>
+        <button className="send-button" title={`Ask as ${role}`} onClick={() => void addQuestion()}>Submit</button>
       </div>
     </div>
   );
@@ -842,7 +775,7 @@ function QuestionList({
   canDelete,
 }: QuestionPanelProps) {
   return (
-    <div className="mt-5 space-y-4">
+    <div className="question-list">
       {questions.length === 0 ? <p className="empty-note">No questions for this view.</p> : null}
       {questions.map((question) => (
         <article key={question.id} className="question-card">
@@ -880,7 +813,9 @@ function QuestionList({
               <p className="eyebrow">Business response</p>
               <p>{question.response}</p>
             </div>
-          ) : null}
+          ) : (
+            <p className="response-empty">No response yet.</p>
+          )}
           {canDelete(question) ? (
             <button className="delete-question" onClick={() => void removeQuestion(question)}>Delete</button>
           ) : null}
@@ -895,18 +830,14 @@ function FullMemo({
   questions,
   title,
   role,
-  approvers,
   openDependencies,
-  approvalConcerns,
   onQuestions,
 }: {
   sections: MemoSection[];
   questions: Question[];
   title: string;
   role: Role;
-  approvers: Approver[];
   openDependencies: number;
-  approvalConcerns: number;
   onQuestions: (id: string) => void;
 }) {
   const askSection = sections.find((section) => section.title === "Bottom-Line Ask");
@@ -918,7 +849,7 @@ function FullMemo({
         {role === "Enablement" ? (
           <div className="approver-summary enablement-summary">
             <div>
-              <p className="eyebrow">Functional review</p>
+              <p className="eyebrow">Enablement review</p>
               <p>Read the full memo as a partner function and capture implications for your own functional plan.</p>
             </div>
             <div>
@@ -928,19 +859,7 @@ function FullMemo({
             </div>
           </div>
         ) : null}
-        {role === "Approver" ? (
-          <div className="approver-summary">
-            <div>
-              <p className="eyebrow">Bottom-Line Ask</p>
-              <p>{askSection?.content || "Bottom-Line Ask is not drafted yet."}</p>
-            </div>
-            <div>
-              <p className="eyebrow">Review posture</p>
-              <p>{approvalConcerns} approval concerns · {openDependencies} enablement dependencies open</p>
-              <p>{approvers.map((approver) => `${approver.name}: ${approver.posture}`).join(" · ")}</p>
-            </div>
-          </div>
-        ) : null}
+        {role === "Approver" && askSection?.content ? <p className="memo-ask-line">{askSection.content}</p> : null}
       </div>
       {sections.map((section, index) => {
         const count = questions.filter((question) => question.sectionId === section.id && question.status !== "Resolved").length;
@@ -952,7 +871,7 @@ function FullMemo({
                 <h3>{section.title}</h3>
               </div>
               <button className="toolbar-button" onClick={() => onQuestions(section.id)}>
-                {role === "Approver" ? "Inspect issues" : "Questions"}{count ? ` (${count})` : ""}
+                Questions{count ? ` (${count})` : ""}
               </button>
             </div>
             <div className="memo-box">{section.content || "Draft content pending."}</div>
@@ -961,123 +880,6 @@ function FullMemo({
       })}
       <span className="sr-only">{title}</span>
     </article>
-  );
-}
-
-function ApprovalPanel({
-  approvers,
-  approvedCount,
-  approverDrafts,
-  newApproverName,
-  newApproverTitle,
-  setNewApproverName,
-  setNewApproverTitle,
-  updateApproverDraft,
-  saveApprover,
-  addApprover,
-  canManageApprovers,
-  open,
-  setOpen,
-  compact = false,
-}: {
-  approvers: Approver[];
-  approvedCount: number;
-  approverDrafts: Record<string, string>;
-  newApproverName: string;
-  newApproverTitle: string;
-  setNewApproverName: (value: string) => void;
-  setNewApproverTitle: (value: string) => void;
-  updateApproverDraft: (id: string, posture: string) => void;
-  saveApprover: (approver: Approver) => Promise<void>;
-  addApprover: () => Promise<void>;
-  canManageApprovers: boolean;
-  open: boolean;
-  setOpen: (open: boolean) => void;
-  compact?: boolean;
-}) {
-  return (
-    <section className={`approval-panel ${compact ? "approval-panel-compact" : ""}`}>
-      <button className="approval-panel-head" onClick={() => setOpen(!open)}>
-        <span>
-          <strong>Executive approval</strong>
-          <small>{approvedCount}/{approvers.length || 5} approved · individual posture is separate from plan status</small>
-        </span>
-        <b>{open ? "Hide" : "Show"}</b>
-      </button>
-      {open ? (
-        <div className="approval-grid">
-          {approvers.map((approver) => (
-            <div key={approver.id} className="approver-card">
-              <div>
-                <p className="font-bold">{approver.name}</p>
-                <p className="text-sm text-[#756f64]">{approver.title}</p>
-              </div>
-              <select
-                value={approverDrafts[approver.id] ?? approver.posture}
-                onChange={(event) => updateApproverDraft(approver.id, event.target.value)}
-              >
-                {approverPostures.map((posture) => (
-                  <option key={posture}>{posture}</option>
-                ))}
-              </select>
-              <button className="toolbar-button" onClick={() => void saveApprover(approver)}>Save</button>
-            </div>
-          ))}
-          {canManageApprovers ? (
-            <div className="approver-card approver-admin-card">
-              <p className="eyebrow">Admin</p>
-              <p className="text-sm text-[#756f64]">Will can add approvers for the full memo.</p>
-              <input value={newApproverName} onChange={(event) => setNewApproverName(event.target.value)} placeholder="Add approver name" />
-              <input value={newApproverTitle} onChange={(event) => setNewApproverTitle(event.target.value)} placeholder="Title or role" />
-              <button className="primary-button" onClick={() => void addApprover()}>Add approver</button>
-            </div>
-          ) : null}
-        </div>
-      ) : null}
-    </section>
-  );
-}
-
-function IssueSummary({
-  questions,
-  title = "Open items",
-  concernLabel = "approval concerns",
-  dependencyLabel = "enablement dependencies or constraints",
-  onInspect,
-}: {
-  questions: Question[];
-  title?: string;
-  concernLabel?: string;
-  dependencyLabel?: string;
-  onInspect: (sectionId: string) => void;
-}) {
-  const openItems = questions.filter((question) => question.status !== "Resolved");
-  const concerns = openItems.filter((question) =>
-    concernLabel === "approval concerns"
-      ? question.issueType === "Approval Concern"
-      : ["Support Need", "Functional Dependency", "Required Input", "Risk / Constraint"].includes(question.issueType),
-  );
-  const dependencies = openItems.filter((question) =>
-    ["Functional Dependency", "Support Need", "Required Input", "Risk / Constraint"].includes(question.issueType),
-  );
-
-  return (
-    <section className="issue-summary">
-      <div>
-        <p className="eyebrow">{title}</p>
-        <h2>{concerns.length} {concernLabel}</h2>
-        <p>{dependencies.length} {dependencyLabel} remain open.</p>
-      </div>
-      <div className="issue-summary-list">
-        {openItems.slice(0, 4).map((question) => (
-          <button key={question.id} onClick={() => onInspect(question.sectionId)}>
-            <span>{question.issueType}</span>
-            <b>{question.status}</b>
-          </button>
-        ))}
-        {openItems.length === 0 ? <p className="empty-note">No open issues.</p> : null}
-      </div>
-    </section>
   );
 }
 
@@ -1170,10 +972,6 @@ function guidanceBullets(section: MemoSection) {
     ];
   }
   return [section.prompt, section.emphasize, section.avoid];
-}
-
-function countWords(value: string) {
-  return value.trim().split(/\s+/).filter(Boolean).length;
 }
 
 function sectionCoachActions(title: string) {
