@@ -7,14 +7,27 @@ type CoachPayload = {
   context?: unknown;
 };
 
-function getOutputText(payload: any) {
+type ResponseContent = {
+  text?: unknown;
+};
+
+type ResponseOutputItem = {
+  content?: ResponseContent[];
+};
+
+type ResponsesApiPayload = {
+  output_text?: unknown;
+  output?: ResponseOutputItem[];
+};
+
+function getOutputText(payload: ResponsesApiPayload) {
   if (typeof payload.output_text === "string") {
     return payload.output_text;
   }
 
   const parts = payload.output
-    ?.flatMap((item: any) => item.content ?? [])
-    ?.map((content: any) => content.text)
+    ?.flatMap((item) => item.content ?? [])
+    ?.map((content) => content.text)
     ?.filter((text: unknown): text is string => typeof text === "string");
 
   return parts?.join("\n").trim() || "";
@@ -58,7 +71,9 @@ export async function POST(request: Request) {
     }),
   });
 
-  const data = await response.json();
+  const data = (await response.json()) as ResponsesApiPayload & {
+    error?: { message?: string };
+  };
 
   if (!response.ok) {
     return Response.json(

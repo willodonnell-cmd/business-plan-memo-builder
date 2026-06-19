@@ -1,10 +1,10 @@
-import { and, asc, eq, inArray, or, sql } from "drizzle-orm";
+import { and, asc, eq, or } from "drizzle-orm";
 import { getDb } from "../../../db";
 import {
-  approvalPostures,
+  approvers,
   businessPlans,
   memoSections,
-  sectionComments,
+  sectionQuestions,
 } from "../../../db/schema";
 
 const PLAN_ID = "2027-business-plan";
@@ -53,9 +53,9 @@ const seedSections = [
 ];
 
 type Role = "business" | "enablement" | "approver";
-type Visibility = "Public" | "Draft" | "Team only";
-type PlanStatus = "Draft" | "Ready for review";
-type ApprovalPosture = "Ready for review" | "Open question" | "Approved";
+type Visibility = "Public" | "Draft" | "Private";
+type PlanStatus = "Draft" | "Review" | "Approved";
+type ApprovalPosture = "Questions" | "Approved";
 
 type ViewerIdentity = {
   email: string;
@@ -77,7 +77,7 @@ function isRole(value: string | null): value is Role {
 }
 
 function isVisibility(value: unknown): value is Visibility {
-  return value === "Public" || value === "Draft" || value === "Team only";
+  return value === "Public" || value === "Draft" || value === "Private";
 }
 
 function roleAuthor(role: Role) {
@@ -94,45 +94,46 @@ function getViewerIdentity(request: Request, role: Role): ViewerIdentity {
   };
 }
 
-function canDeleteComment(comment: { author: string }, viewer: ViewerIdentity) {
-  return comment.author === viewer.label || (!!viewer.email && comment.author === viewer.email);
+function canDeleteComment(comment: { authorName: string; authorEmail: string | null }, viewer: ViewerIdentity) {
+  return (
+    comment.authorName === viewer.label ||
+    (!!viewer.email && (comment.authorName === viewer.email || comment.authorEmail === viewer.email))
+  );
 }
 
 function normalizePlanStatus(status: string | null | undefined): PlanStatus {
-  return status === "Ready for review" ? "Ready for review" : "Draft";
+  if (status === "Review") return "Review";
+  if (status === "Approved") return "Approved";
+  return "Draft";
 }
 
 function normalizePosture(posture: string): ApprovalPosture {
-  if (posture === "Approved") return "Approved";
-  if (posture === "Open question" || posture === "Needs clarification") return "Open question";
-  if (posture === "Ready for review" || posture === "Ready") return "Ready for review";
-  return "Ready for review";
+  return posture === "Approved" ? "Approved" : "Questions";
 }
 
 function isApprovalPosture(value: string): value is ApprovalPosture {
-  return value === "Ready for review" || value === "Open question" || value === "Approved";
+  return value === "Questions" || value === "Approved";
 }
 
 function visibleCommentFilter(role: Role, viewer: ViewerIdentity) {
   if (role === "business") {
-    // Business sees: Public questions and Team only questions (not Draft from others)
+    // Business sees public questions and their own drafts.
     return or(
-      eq(sectionComments.visibility, "Public"),
-      eq(sectionComments.visibility, "Team only"),
+      eq(sectionQuestions.visibility, "Public"),
       and(
-        eq(sectionComments.visibility, "Draft"),
-        eq(sectionComments.author, viewer.label),
+        eq(sectionQuestions.visibility, "Draft"),
+        or(eq(sectionQuestions.authorName, viewer.label), eq(sectionQuestions.authorEmail, viewer.email)),
       ),
     );
   }
 
-  // Enablement/Approver see: Public, their own Drafts, all Team only
+  // Enablement/Approver see public questions, private questions, and their own drafts.
   return or(
-    eq(sectionComments.visibility, "Public"),
-    eq(sectionComments.visibility, "Team only"),
+    eq(sectionQuestions.visibility, "Public"),
+    eq(sectionQuestions.visibility, "Private"),
     and(
-      or(eq(sectionComments.author, viewer.email), eq(sectionComments.author, viewer.label)),
-      eq(sectionComments.visibility, "Draft"),
+      or(eq(sectionQuestions.authorEmail, viewer.email), eq(sectionQuestions.authorName, viewer.label)),
+      eq(sectionQuestions.visibility, "Draft"),
     ),
   );
 }
@@ -153,13 +154,21 @@ async function ensureSeedData() {
     id: PLAN_ID,
     title: "2027 Business Plan",
     teamName: "",
+    approvalState: "Draft",
+    approvalPosture: "Drafting",
+    updatedAt: new Date(),
   });
 
   await db.insert(memoSections).values(
     seedSections.map((section, index) => ({
-      ...section,
+      id: section.id,
       planId: PLAN_ID,
+      sectionKey: section.id,
+      title: section.title,
       position: index + 1,
+      content: "",
+      status: "Draft" as const,
+      updatedAt: new Date(),
     })),
   );
 }
@@ -186,20 +195,20 @@ export async function GET(request: Request) {
       .orderBy(asc(memoSections.position));
     const comments = await db
       .select()
-      .from(sectionComments)
+      .from(sectionQuestions)
       .where(
-        and(eq(sectionComments.planId, PLAN_ID), visibleCommentFilter(role, viewer)),
+        and(eq(sectionQuestions.planId, PLAN_ID), visibleCommentFilter(role, viewer)),
       );
     const approvals = await db
       .select()
-      .from(approvalPostures)
-      .where(eq(approvalPostures.planId, PLAN_ID));
+      .from(approvers)
+      .where(eq(approvers.planId, PLAN_ID));
 
     return Response.json({
       plan: plan
         ? {
             ...plan,
-            planStatus: normalizePlanStatus(plan.planStatus),
+            planStatus: normalizePlanStatus(plan.approvalState),
           }
         : plan,
       sections,
@@ -238,7 +247,7 @@ export async function POST(request: Request) {
 
       await db
         .update(businessPlans)
-        .set({ teamName, updatedAt: sql`CURRENT_TIMESTAMP` })
+        .set({ teamName, updatedAt: new Date() })
         .where(eq(businessPlans.id, PLAN_ID));
 
       return Response.json({ ok: true });
@@ -255,7 +264,7 @@ export async function POST(request: Request) {
 
       await db
         .update(memoSections)
-        .set({ content, status: status as "Draft" | "Review" | "Approved", updatedAt: sql`CURRENT_TIMESTAMP` })
+        .set({ content, status: status as "Draft" | "Review" | "Approved", updatedAt: new Date() })
         .where(and(eq(memoSections.id, sectionId), eq(memoSections.planId, PLAN_ID)));
 
       return Response.json({ ok: true });
@@ -273,14 +282,20 @@ export async function POST(request: Request) {
         return Response.json({ error: "User identity and question are required" }, { status: 400 });
       }
 
-      await db.insert(sectionComments).values({
+      await db.insert(sectionQuestions).values({
         id: crypto.randomUUID(),
         planId: PLAN_ID,
         sectionId,
-        author: viewer.label,
-        role,
+        authorName: viewer.label,
+        authorEmail: viewer.email,
+        authorRole: role === "business" ? "Business Team" : role === "enablement" ? "Enablement" : "Approver",
         body,
         visibility,
+        status: "Open",
+        issueType: role === "approver" ? "Approval Concern" : "Clarification",
+        functionName: "",
+        createdAt: new Date(),
+        updatedAt: new Date(),
       });
 
       return Response.json({ ok: true }, { status: 201 });
@@ -296,13 +311,13 @@ export async function POST(request: Request) {
       }
 
       await db
-        .update(sectionComments)
+        .update(sectionQuestions)
         .set({
-          status: status as "Open" | "Resolved",
+          status: status === "Resolved" ? "Resolved" : "Open",
           response,
-          updatedAt: sql`CURRENT_TIMESTAMP`,
+          updatedAt: new Date(),
         })
-        .where(eq(sectionComments.id, commentId));
+        .where(eq(sectionQuestions.id, commentId));
 
       return Response.json({ ok: true });
     }
@@ -312,8 +327,8 @@ export async function POST(request: Request) {
 
       const [comment] = await db
         .select()
-        .from(sectionComments)
-        .where(and(eq(sectionComments.id, commentId), eq(sectionComments.planId, PLAN_ID)))
+        .from(sectionQuestions)
+        .where(and(eq(sectionQuestions.id, commentId), eq(sectionQuestions.planId, PLAN_ID)))
         .limit(1);
 
       if (!comment) {
@@ -324,7 +339,7 @@ export async function POST(request: Request) {
         return Response.json({ error: "You do not have permission to delete this question" }, { status: 403 });
       }
 
-      await db.delete(sectionComments).where(eq(sectionComments.id, commentId));
+      await db.delete(sectionQuestions).where(eq(sectionQuestions.id, commentId));
       return Response.json({ ok: true });
     }
 
@@ -335,7 +350,7 @@ export async function POST(request: Request) {
 
       await db
         .update(businessPlans)
-        .set({ planStatus: "Ready for review", updatedAt: sql`CURRENT_TIMESTAMP` })
+        .set({ approvalState: "Review", updatedAt: new Date() })
         .where(eq(businessPlans.id, PLAN_ID));
 
       return Response.json({ ok: true });
@@ -343,37 +358,38 @@ export async function POST(request: Request) {
 
     if (action === "save-approval") {
       const approver = String(payload.approver ?? "").trim() || "Approver";
-      const posture = String(payload.posture ?? "Ready for review");
+      const posture = String(payload.posture ?? "Questions");
 
       if (!isApprovalPosture(posture)) {
         return Response.json({ error: "Invalid approval posture" }, { status: 400 });
       }
 
       const [plan] = await db
-        .select({ planStatus: businessPlans.planStatus })
+        .select({ approvalState: businessPlans.approvalState })
         .from(businessPlans)
         .where(eq(businessPlans.id, PLAN_ID))
         .limit(1);
 
-      if (normalizePlanStatus(plan?.planStatus) !== "Ready for review") {
+      if (normalizePlanStatus(plan?.approvalState) !== "Review") {
         return Response.json({ error: "Plan has not been submitted for review" }, { status: 400 });
       }
 
       const id = `${PLAN_ID}:plan:${approver}`;
       await db
-        .insert(approvalPostures)
+        .insert(approvers)
         .values({
           id,
           planId: PLAN_ID,
-          sectionId: null,
-          approver,
+          name: approver,
+          title: "Approver",
           posture,
+          updatedAt: new Date(),
         })
         .onConflictDoUpdate({
-          target: approvalPostures.id,
+          target: approvers.id,
           set: {
             posture,
-            updatedAt: sql`CURRENT_TIMESTAMP`,
+            updatedAt: new Date(),
           },
         });
 
