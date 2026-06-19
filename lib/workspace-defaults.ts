@@ -9,7 +9,7 @@ export type IssueType =
   | "Risk / Constraint"
   | "Required Input"
   | "Approval Concern";
-export type EnablementFunction = "Legal" | "HR" | "Marketing" | "IT" | "Customer Account Management" | "Other";
+export type EnablementFunction = "HR" | "Legal" | "IT" | "Finance & Accounting" | "Tax" | "Marketing" | "CLS" | "Other";
 export type Visibility = "Public" | "Draft" | "Private";
 
 export type MemoSection = {

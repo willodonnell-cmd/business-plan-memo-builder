@@ -50,7 +50,7 @@ export const sectionQuestions = sqliteTable("section_questions", {
     .notNull()
     .default("Clarification"),
   functionName: text("function_name", {
-    enum: ["", "Legal", "HR", "Marketing", "IT", "Customer Account Management", "Other"],
+    enum: ["", "HR", "Legal", "IT", "Finance & Accounting", "Tax", "Marketing", "CLS", "Other"],
   })
     .notNull()
     .default(""),

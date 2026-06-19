@@ -25,15 +25,7 @@ type SaveState = "idle" | "saving" | "saved" | "error";
 const roles: Role[] = ["Business Team", "Enablement", "Approver"];
 const sectionReadinessStatuses: SectionStatus[] = ["Draft", "Review"];
 const questionStatuses: QuestionStatus[] = ["Open", "Answered", "Resolved", "Reopened", "No Change Needed"];
-const issueTypes: IssueType[] = [
-  "Clarification",
-  "Functional Dependency",
-  "Support Need",
-  "Risk / Constraint",
-  "Required Input",
-  "Approval Concern",
-];
-const enablementFunctions: EnablementFunction[] = ["Legal", "HR", "Marketing", "IT", "Customer Account Management", "Other"];
+const enablementFunctions: EnablementFunction[] = ["HR", "Legal", "IT", "Finance & Accounting", "Tax", "Marketing", "CLS", "Other"];
 const approverPostures = ["Questions", "Approved"];
 const BUSINESS_PLAN_OPTIONS = [
   "Essentials",
@@ -156,7 +148,7 @@ export default function Home() {
         author: role === "Business Team" ? "Business Team" : role,
         role,
         visibility,
-        issueType: role === "Approver" ? "Approval Concern" : issueType,
+        issueType: role === "Approver" ? "Approval Concern" : role === "Enablement" ? "Support Need" : issueType,
         functionName: role === "Enablement" ? enablementFunction : "",
         body: questionDraft.trim(),
       }),
@@ -223,7 +215,7 @@ export default function Home() {
     }
     setMode("Full Memo");
     setQuestionsOpen(nextRole === "Enablement" || nextRole === "Approver");
-    setIssueType(nextRole === "Approver" ? "Approval Concern" : "Functional Dependency");
+    setIssueType(nextRole === "Approver" ? "Approval Concern" : nextRole === "Enablement" ? "Support Need" : "Clarification");
   }
 
   useEffect(() => {
@@ -721,11 +713,9 @@ type QuestionPanelProps = {
 function QuestionComposer({
   role,
   visibility,
-  issueType,
   enablementFunction,
   questionDraft,
   setVisibility,
-  setIssueType,
   setEnablementFunction,
   setQuestionDraft,
   addQuestion,
@@ -739,20 +729,15 @@ function QuestionComposer({
         onChange={(event) => setQuestionDraft(event.target.value)}
         placeholder={role === "Enablement" ? "Flag a dependency, support need, required input, or clarification..." : "Ask a focused, section-level question..."}
       />
-      <div className="mt-3 grid gap-2 sm:grid-cols-2">
-        <select value={role === "Approver" ? "Approval Concern" : issueType} onChange={(event) => setIssueType(event.target.value as IssueType)}>
-          {issueTypes.map((item) => (
-            <option key={item}>{item}</option>
-          ))}
-        </select>
-        {role === "Enablement" ? (
+      {role === "Enablement" ? (
+        <div className="mt-3">
           <select value={enablementFunction} onChange={(event) => setEnablementFunction(event.target.value as EnablementFunction)}>
             {enablementFunctions.map((item) => (
               <option key={item}>{item}</option>
             ))}
           </select>
-        ) : null}
-      </div>
+        </div>
+      ) : null}
       <div className="question-submit-row">
         <select value={visibility} onChange={(event) => setVisibility(event.target.value as Visibility)}>
           <option value="Public">Public — everyone sees this</option>

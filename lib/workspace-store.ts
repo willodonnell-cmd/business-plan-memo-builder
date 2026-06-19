@@ -61,7 +61,7 @@ const allowedIssueTypes = [
   "Required Input",
   "Approval Concern",
 ] as const;
-const allowedEnablementFunctions = ["", "Legal", "HR", "Marketing", "IT", "Customer Account Management", "Other"] as const;
+const allowedEnablementFunctions = ["", "HR", "Legal", "IT", "Finance & Accounting", "Tax", "Marketing", "CLS", "Other"] as const;
 const allowedRoles = ["Business Team", "Enablement", "Approver"] as const;
 const allowedVisibility = ["Public", "Draft", "Private"] as const;
 const placeholderApproverNames = ["M. Rivera", "A. Chen", "S. Williams"];
