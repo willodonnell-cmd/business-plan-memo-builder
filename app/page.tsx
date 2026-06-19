@@ -434,10 +434,6 @@ export default function Home() {
               title={planTitle}
               role={role}
               openDependencies={openDependencies}
-              onQuestions={(id) => {
-                setActiveId(id);
-                setQuestionsOpen(true);
-              }}
             />
             <aside className="full-memo-sidebar">
               {role === "Approver" ? (
@@ -816,14 +812,12 @@ function FullMemo({
   title,
   role,
   openDependencies,
-  onQuestions,
 }: {
   sections: MemoSection[];
   questions: Question[];
   title: string;
   role: Role;
   openDependencies: number;
-  onQuestions: (id: string) => void;
 }) {
   const askSection = sections.find((section) => section.title === "Bottom-Line Ask");
   return (
@@ -847,7 +841,6 @@ function FullMemo({
         {role === "Approver" && askSection?.content ? <p className="memo-ask-line">{askSection.content}</p> : null}
       </div>
       {sections.map((section, index) => {
-        const count = questions.filter((question) => question.sectionId === section.id && question.status !== "Resolved").length;
         return (
           <section key={section.id} className="full-memo-section">
             <div className="flex items-start justify-between gap-4">
@@ -855,9 +848,6 @@ function FullMemo({
                 <p className="eyebrow">Section {index + 1}</p>
                 <h3>{section.title}</h3>
               </div>
-              <button className="toolbar-button" onClick={() => onQuestions(section.id)}>
-                Questions{count ? ` (${count})` : ""}
-              </button>
             </div>
             <div className="memo-box">{section.content || "Draft content pending."}</div>
           </section>
