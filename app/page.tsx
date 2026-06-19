@@ -57,7 +57,6 @@ export default function Home() {
   const [visibility, setVisibility] = useState<Visibility>("Public");
   const [issueType, setIssueType] = useState<IssueType>("Clarification");
   const [enablementFunction, setEnablementFunction] = useState<EnablementFunction>("Legal");
-  const [enablementPosture, setEnablementPosture] = useState("Questions Open");
   const [responseDrafts, setResponseDrafts] = useState<Record<string, string>>({});
   const [approverDrafts, setApproverDrafts] = useState<Record<string, string>>({});
   const [newApproverName, setNewApproverName] = useState("");
@@ -536,21 +535,6 @@ export default function Home() {
                 </>
               ) : role === "Enablement" ? (
                 <>
-                  <EnablementPostureCard
-                    value={enablementPosture}
-                    setValue={setEnablementPosture}
-                    openDependencies={openDependencies}
-                  />
-                  <IssueSummary
-                    questions={allVisibleQuestions}
-                    title="Functional items"
-                    concernLabel="support needs"
-                    dependencyLabel="dependencies, constraints, or required inputs"
-                    onInspect={(sectionId) => {
-                      setActiveId(sectionId);
-                      setQuestionsOpen(true);
-                    }}
-                  />
                   {questionsOpen ? (
                     <QuestionDrawer
                       role={role}
@@ -573,7 +557,7 @@ export default function Home() {
                     />
                   ) : (
                     <button className="questions-button" onClick={() => setQuestionsOpen(true)}>
-                      Add or inspect functional questions
+                      Questions
                     </button>
                   )}
                 </>
@@ -769,42 +753,16 @@ function QuestionPanel(props: QuestionPanelProps) {
 function QuestionDrawer(props: QuestionPanelProps & { onClose: () => void }) {
   return (
     <aside className="question-drawer">
-      <div className="mb-4 flex items-center justify-between">
-        <h2 className="text-xl font-bold">
-          {props.role === "Enablement" ? "Functional questions" : "Questions"} ({props.questions.filter((question) => question.status !== "Resolved").length} open)
-        </h2>
+      <div className="question-drawer-head">
+        <div>
+          <p className="eyebrow">Review thread</p>
+          <h2>Questions ({props.questions.filter((question) => question.status !== "Resolved").length} open)</h2>
+        </div>
         <button className="toolbar-button" onClick={props.onClose}>Close</button>
       </div>
       <QuestionComposer {...props} />
       <QuestionList {...props} />
     </aside>
-  );
-}
-
-function EnablementPostureCard({
-  value,
-  setValue,
-  openDependencies,
-}: {
-  value: string;
-  setValue: (value: string) => void;
-  openDependencies: number;
-}) {
-  const postures = ["Reviewed", "Questions Open", "Dependency Flagged", "Support Needed", "No Objection"];
-  return (
-    <section className="enablement-card">
-      <p className="eyebrow">Enablement posture</p>
-      <h2>Functional read status</h2>
-      <p>
-        Use this to signal understanding and planning implications for your function. It does not approve the business plan.
-      </p>
-      <select value={value} onChange={(event) => setValue(event.target.value)}>
-        {postures.map((posture) => (
-          <option key={posture}>{posture}</option>
-        ))}
-      </select>
-      <small>{openDependencies} open dependencies, support needs, or required inputs</small>
-    </section>
   );
 }
 
