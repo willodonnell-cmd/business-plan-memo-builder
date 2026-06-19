@@ -1,11 +1,11 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "fb6e65c2-16c2-4afd-ab31-4095b32a2050",
-  "prevId": "854c775a-aa4c-443d-aad8-3e7e39f3463f",
+  "id": "99ddb753-0e0c-44cd-9336-c286470272a5",
+  "prevId": "681f8b7b-df3f-4bd9-8830-00a0e75392c6",
   "tables": {
-    "approval_postures": {
-      "name": "approval_postures",
+    "approvers": {
+      "name": "approvers",
       "columns": {
         "id": {
           "name": "id",
@@ -21,15 +21,15 @@
           "notNull": true,
           "autoincrement": false
         },
-        "section_id": {
-          "name": "section_id",
+        "name": {
+          "name": "name",
           "type": "text",
           "primaryKey": false,
-          "notNull": false,
+          "notNull": true,
           "autoincrement": false
         },
-        "approver": {
-          "name": "approver",
+        "title": {
+          "name": "title",
           "type": "text",
           "primaryKey": false,
           "notNull": true,
@@ -40,22 +40,22 @@
           "type": "text",
           "primaryKey": false,
           "notNull": true,
-          "autoincrement": false
+          "autoincrement": false,
+          "default": "'Reviewing'"
         },
         "updated_at": {
           "name": "updated_at",
-          "type": "text",
+          "type": "integer",
           "primaryKey": false,
           "notNull": true,
-          "autoincrement": false,
-          "default": "CURRENT_TIMESTAMP"
+          "autoincrement": false
         }
       },
       "indexes": {},
       "foreignKeys": {
-        "approval_postures_plan_id_business_plans_id_fk": {
-          "name": "approval_postures_plan_id_business_plans_id_fk",
-          "tableFrom": "approval_postures",
+        "approvers_plan_id_business_plans_id_fk": {
+          "name": "approvers_plan_id_business_plans_id_fk",
+          "tableFrom": "approvers",
           "tableTo": "business_plans",
           "columnsFrom": [
             "plan_id"
@@ -63,20 +63,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "approval_postures_section_id_memo_sections_id_fk": {
-          "name": "approval_postures_section_id_memo_sections_id_fk",
-          "tableFrom": "approval_postures",
-          "tableTo": "memo_sections",
-          "columnsFrom": [
-            "section_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
+          "onDelete": "cascade",
           "onUpdate": "no action"
         }
       },
@@ -106,24 +93,37 @@
           "type": "text",
           "primaryKey": false,
           "notNull": true,
-          "autoincrement": false,
-          "default": "'Team'"
+          "autoincrement": false
         },
-        "created_at": {
-          "name": "created_at",
+        "approval_state": {
+          "name": "approval_state",
           "type": "text",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false,
-          "default": "CURRENT_TIMESTAMP"
+          "default": "'Draft'"
+        },
+        "approval_posture": {
+          "name": "approval_posture",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'Drafting'"
+        },
+        "created_by": {
+          "name": "created_by",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
         },
         "updated_at": {
           "name": "updated_at",
-          "type": "text",
+          "type": "integer",
           "primaryKey": false,
           "notNull": true,
-          "autoincrement": false,
-          "default": "CURRENT_TIMESTAMP"
+          "autoincrement": false
         }
       },
       "indexes": {},
@@ -149,6 +149,13 @@
           "notNull": true,
           "autoincrement": false
         },
+        "section_key": {
+          "name": "section_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
         "title": {
           "name": "title",
           "type": "text",
@@ -159,13 +166,6 @@
         "position": {
           "name": "position",
           "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "requirement": {
-          "name": "requirement",
-          "type": "text",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
@@ -188,11 +188,10 @@
         },
         "updated_at": {
           "name": "updated_at",
-          "type": "text",
+          "type": "integer",
           "primaryKey": false,
           "notNull": true,
-          "autoincrement": false,
-          "default": "CURRENT_TIMESTAMP"
+          "autoincrement": false
         }
       },
       "indexes": {},
@@ -207,7 +206,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "no action",
+          "onDelete": "cascade",
           "onUpdate": "no action"
         }
       },
@@ -215,8 +214,8 @@
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
-    "section_comments": {
-      "name": "section_comments",
+    "section_questions": {
+      "name": "section_questions",
       "columns": {
         "id": {
           "name": "id",
@@ -239,22 +238,23 @@
           "notNull": true,
           "autoincrement": false
         },
-        "author": {
-          "name": "author",
+        "author_name": {
+          "name": "author_name",
           "type": "text",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },
-        "role": {
-          "name": "role",
+        "author_email": {
+          "name": "author_email",
           "type": "text",
           "primaryKey": false,
           "notNull": true,
-          "autoincrement": false
+          "autoincrement": false,
+          "default": "''"
         },
-        "body": {
-          "name": "body",
+        "author_role": {
+          "name": "author_role",
           "type": "text",
           "primaryKey": false,
           "notNull": true,
@@ -265,7 +265,8 @@
           "type": "text",
           "primaryKey": false,
           "notNull": true,
-          "autoincrement": false
+          "autoincrement": false,
+          "default": "'Public'"
         },
         "status": {
           "name": "status",
@@ -275,36 +276,56 @@
           "autoincrement": false,
           "default": "'Open'"
         },
-        "response": {
-          "name": "response",
+        "issue_type": {
+          "name": "issue_type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'Clarification'"
+        },
+        "function_name": {
+          "name": "function_name",
           "type": "text",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false,
           "default": "''"
         },
-        "created_at": {
-          "name": "created_at",
+        "body": {
+          "name": "body",
           "type": "text",
           "primaryKey": false,
           "notNull": true,
-          "autoincrement": false,
-          "default": "CURRENT_TIMESTAMP"
+          "autoincrement": false
+        },
+        "response": {
+          "name": "response",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
         },
         "updated_at": {
           "name": "updated_at",
-          "type": "text",
+          "type": "integer",
           "primaryKey": false,
           "notNull": true,
-          "autoincrement": false,
-          "default": "CURRENT_TIMESTAMP"
+          "autoincrement": false
         }
       },
       "indexes": {},
       "foreignKeys": {
-        "section_comments_plan_id_business_plans_id_fk": {
-          "name": "section_comments_plan_id_business_plans_id_fk",
-          "tableFrom": "section_comments",
+        "section_questions_plan_id_business_plans_id_fk": {
+          "name": "section_questions_plan_id_business_plans_id_fk",
+          "tableFrom": "section_questions",
           "tableTo": "business_plans",
           "columnsFrom": [
             "plan_id"
@@ -312,12 +333,12 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "no action",
+          "onDelete": "cascade",
           "onUpdate": "no action"
         },
-        "section_comments_section_id_memo_sections_id_fk": {
-          "name": "section_comments_section_id_memo_sections_id_fk",
-          "tableFrom": "section_comments",
+        "section_questions_section_id_memo_sections_id_fk": {
+          "name": "section_questions_section_id_memo_sections_id_fk",
+          "tableFrom": "section_questions",
           "tableTo": "memo_sections",
           "columnsFrom": [
             "section_id"
@@ -325,7 +346,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "no action",
+          "onDelete": "cascade",
           "onUpdate": "no action"
         }
       },

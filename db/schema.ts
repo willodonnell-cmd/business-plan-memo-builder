@@ -1,65 +1,73 @@
-import { sql } from "drizzle-orm";
 import { integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
 
 export const businessPlans = sqliteTable("business_plans", {
   id: text("id").primaryKey(),
   title: text("title").notNull(),
-  teamName: text("team_name").notNull().default("Team"),
-  planStatus: text("plan_status", { enum: ["Draft", "Ready for review"] })
+  teamName: text("team_name").notNull(),
+  approvalState: text("approval_state", { enum: ["Draft", "Review", "Approved"] })
     .notNull()
     .default("Draft"),
-  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
-  updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  approvalPosture: text("approval_posture").notNull().default("Drafting"),
+  createdBy: text("created_by"),
+  updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
 });
 
 export const memoSections = sqliteTable("memo_sections", {
   id: text("id").primaryKey(),
   planId: text("plan_id")
     .notNull()
-    .references(() => businessPlans.id),
+    .references(() => businessPlans.id, { onDelete: "cascade" }),
+  sectionKey: text("section_key").notNull(),
   title: text("title").notNull(),
   position: integer("position").notNull(),
-  requirement: text("requirement").notNull(),
   content: text("content").notNull().default(""),
-  status: text("status", { enum: ["Draft", "Review", "Approved"] })
-    .notNull()
-    .default("Draft"),
-  updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  status: text("status", { enum: ["Draft", "Review", "Approved"] }).notNull().default("Draft"),
+  updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
 });
 
-export const sectionComments = sqliteTable("section_comments", {
+export const sectionQuestions = sqliteTable("section_questions", {
   id: text("id").primaryKey(),
   planId: text("plan_id")
     .notNull()
-    .references(() => businessPlans.id),
+    .references(() => businessPlans.id, { onDelete: "cascade" }),
   sectionId: text("section_id")
     .notNull()
-    .references(() => memoSections.id),
-  author: text("author").notNull(),
-  role: text("role", { enum: ["business", "enablement", "approver"] }).notNull(),
-  body: text("body").notNull(),
-  visibility: text("visibility", {
-    enum: ["Public", "Draft", "Private"],
-  }).notNull(),
-  status: text("status", {
-    enum: ["Open", "Resolved"],
+    .references(() => memoSections.id, { onDelete: "cascade" }),
+  authorName: text("author_name").notNull(),
+  authorEmail: text("author_email").notNull().default(""),
+  authorRole: text("author_role", { enum: ["Business Team", "Enablement", "Approver"] }).notNull(),
+  visibility: text("visibility", { enum: ["Public", "Draft", "Private"] }).notNull().default("Public"),
+  status: text("status", { enum: ["Open", "Answered", "Resolved", "Reopened", "No Change Needed"] }).notNull().default("Open"),
+  issueType: text("issue_type", {
+    enum: [
+      "Clarification",
+      "Functional Dependency",
+      "Support Need",
+      "Risk / Constraint",
+      "Required Input",
+      "Approval Concern",
+    ],
   })
     .notNull()
-    .default("Open"),
-  response: text("response").notNull().default(""),
-  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
-  updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    .default("Clarification"),
+  functionName: text("function_name", {
+    enum: ["", "Legal", "HR", "Marketing", "IT", "Customer Account Management", "Other"],
+  })
+    .notNull()
+    .default(""),
+  body: text("body").notNull(),
+  response: text("response"),
+  createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+  updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
 });
 
-export const approvalPostures = sqliteTable("approval_postures", {
+export const approvers = sqliteTable("approvers", {
   id: text("id").primaryKey(),
   planId: text("plan_id")
     .notNull()
-    .references(() => businessPlans.id),
-  sectionId: text("section_id").references(() => memoSections.id),
-  approver: text("approver").notNull(),
-  posture: text("posture", {
-    enum: ["Ready for review", "Open question", "Approved"],
-  }).notNull(),
-  updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    .references(() => businessPlans.id, { onDelete: "cascade" }),
+  name: text("name").notNull(),
+  title: text("title").notNull(),
+  posture: text("posture").notNull().default("Reviewing"),
+  updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
 });
