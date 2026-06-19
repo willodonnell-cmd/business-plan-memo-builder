@@ -446,6 +446,18 @@ textarea:focus {
   background: #fff4e6;
 }
 
+.draft-content-button {
+  min-height: 30px;
+  border: 1px solid #d9d5ca;
+  border-radius: 999px;
+  background: #fffdf8;
+  padding: 0 10px;
+  color: #68645b;
+  font-size: 0.74rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
 .section-actions {
   display: flex;
   flex-wrap: wrap;

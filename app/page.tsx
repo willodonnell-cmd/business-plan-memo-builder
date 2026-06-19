@@ -387,7 +387,7 @@ export default function Home() {
 
               <div className="section-editor-layout">
                 <div className="editor-pane">
-                  <LengthPanel sections={sections} activeSection={activeSection} estimatedPages={estimatedPages} wordCount={wordCount} />
+                  <LengthPanel estimatedPages={estimatedPages} />
                   <div className="mb-3 flex items-center justify-between gap-3">
                     <div className="flex flex-wrap gap-2">
                       {sectionReadinessStatuses.map((status) => (
@@ -400,22 +400,27 @@ export default function Home() {
                         </button>
                       ))}
                     </div>
-                    {role === "Business Team" ? (
-                      <div className="section-actions">
-                        <button className="toolbar-button" onClick={() => void saveSection(activeSection, { status: "Review" })}>
-                          Mark Ready for Enablement
-                        </button>
-                        <button
-                          className="toolbar-button"
-                          onClick={() => void savePlan({ approvalState: "Review", approvalPosture: "Ready for Executive Approval" })}
-                        >
-                          Mark Memo Ready for Approval
-                        </button>
-                        <button className="primary-button" onClick={() => void saveSection(activeSection, { content: activeSection.content })}>
-                          Save Draft
-                        </button>
-                      </div>
-                    ) : null}
+                    <div className="section-actions">
+                      <button className="draft-content-button" type="button">
+                        {sections.filter((section) => section.content.trim()).length}/{sections.length} drafted
+                      </button>
+                      {role === "Business Team" ? (
+                        <>
+                          <button className="toolbar-button" onClick={() => void saveSection(activeSection, { status: "Review" })}>
+                            Mark Ready for Enablement
+                          </button>
+                          <button
+                            className="toolbar-button"
+                            onClick={() => void savePlan({ approvalState: "Review", approvalPosture: "Ready for Executive Approval" })}
+                          >
+                            Mark Memo Ready for Approval
+                          </button>
+                          <button className="primary-button" onClick={() => void saveSection(activeSection, { content: activeSection.content })}>
+                            Save Draft
+                          </button>
+                        </>
+                      ) : null}
+                    </div>
                   </div>
                   {role === "Business Team" ? (
                     <textarea
@@ -679,23 +684,14 @@ function roleFocus(role: Role) {
 }
 
 function LengthPanel({
-  sections,
-  activeSection,
   estimatedPages,
-  wordCount,
 }: {
-  sections: MemoSection[];
-  activeSection: MemoSection;
   estimatedPages: number;
-  wordCount: number;
 }) {
-  const sectionWords = countWords(activeSection.content);
+  if (estimatedPages <= 4) return null;
   return (
-    <div className={`length-panel ${estimatedPages > 4 ? "length-panel-warn" : ""}`}>
-      <span>{wordCount} words · about {estimatedPages} page{estimatedPages === 1 ? "" : "s"}</span>
-      <span>{activeSection.title}: {sectionWords} words</span>
-      {estimatedPages > 4 ? <b>Likely over four pages. Consider using GPT Coach to tighten without removing important facts.</b> : null}
-      <span>{sections.filter((section) => section.content.trim()).length}/{sections.length} sections have draft content</span>
+    <div className="length-panel length-panel-warn">
+      <b>Likely over four pages. Consider using GPT Coach to tighten without removing important facts.</b>
     </div>
   );
 }
