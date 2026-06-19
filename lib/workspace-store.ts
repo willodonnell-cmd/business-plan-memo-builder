@@ -354,8 +354,10 @@ async function ensureSchema(d1: D1Database) {
 
   await addColumnIfMissing(d1, "business_plans", "approval_state", "text DEFAULT 'Draft' NOT NULL");
   await addColumnIfMissing(d1, "business_plans", "approval_posture", "text DEFAULT 'Drafting' NOT NULL");
+  await addColumnIfMissing(d1, "memo_sections", "section_key", "text");
   await addColumnIfMissing(d1, "section_questions", "issue_type", "text DEFAULT 'Clarification' NOT NULL");
   await addColumnIfMissing(d1, "section_questions", "function_name", "text DEFAULT '' NOT NULL");
+  await backfillSectionKeys(d1);
 }
 
 async function ensureDefaultWorkspace(d1: D1Database) {
@@ -473,6 +475,37 @@ async function addColumnIfMissing(d1: D1Database, table: string, column: string,
     return;
   }
   await d1.prepare(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`).run();
+}
+
+async function backfillSectionKeys(d1: D1Database) {
+  const rows = await d1
+    .prepare("SELECT id, title, position, section_key FROM memo_sections WHERE plan_id = ? ORDER BY position ASC")
+    .bind(PLAN_ID)
+    .all<{ id: string; title: string; position: number; section_key?: string | null }>();
+
+  const updates = [];
+
+  for (const row of rows.results ?? []) {
+    if (row.section_key?.trim()) {
+      continue;
+    }
+
+    const byTitle = sectionDefaults.find((section) => section.title === row.title);
+    const byPosition = Number.isInteger(row.position) ? sectionDefaults[row.position - 1] : undefined;
+    const resolvedKey = byTitle?.key ?? byPosition?.key;
+
+    if (!resolvedKey) {
+      continue;
+    }
+
+    updates.push(
+      d1.prepare("UPDATE memo_sections SET section_key = ? WHERE id = ? AND plan_id = ?").bind(resolvedKey, row.id, PLAN_ID),
+    );
+  }
+
+  if (updates.length > 0) {
+    await d1.batch(updates);
+  }
 }
 
 function authorForRole(role: Role) {
