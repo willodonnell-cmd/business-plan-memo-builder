@@ -373,6 +373,7 @@ async function ensureSchema(d1: D1Database) {
 
   await addColumnIfMissing(d1, "business_plans", "approval_state", "text DEFAULT 'Draft' NOT NULL");
   await addColumnIfMissing(d1, "business_plans", "approval_posture", "text DEFAULT 'Drafting' NOT NULL");
+  await addColumnIfMissing(d1, "business_plans", "created_by", "text");
   await addColumnIfMissing(d1, "memo_sections", "section_key", "text");
   await addColumnIfMissing(d1, "section_questions", "issue_type", "text DEFAULT 'Clarification' NOT NULL");
   await addColumnIfMissing(d1, "section_questions", "function_name", "text DEFAULT '' NOT NULL");
