@@ -6,8 +6,9 @@ export async function PATCH(
 ) {
   try {
     const { id } = await context.params;
-    await updateApprover(id, await request.json());
-    return Response.json({ plan: await getWorkspacePlan() });
+    const input = await request.json();
+    await updateApprover(id, input);
+    return Response.json({ plan: await getWorkspacePlan(input.planId) });
   } catch (error) {
     const message = toRouteErrorMessage(error);
     const status = message.includes("not found") ? 404 : 500;

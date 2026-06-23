@@ -57,6 +57,48 @@ export type WorkspacePlan = {
 
 export const PLAN_ID = "2027-business-plan";
 
+export type BusinessPlanWorkstream = {
+  id: string;
+  label: string;
+  teamName: string;
+  title: string;
+};
+
+export const businessPlanWorkstreams = [
+  {
+    id: PLAN_ID,
+    label: "Essentials",
+    teamName: "Essentials",
+    title: "2027 Essentials Business Plan",
+  },
+  {
+    id: "2027-prologis-energy-solutions-business-plan",
+    label: "Prologis Energy Solutions",
+    teamName: "Prologis Energy Solutions",
+    title: "2027 Prologis Energy Solutions Business Plan",
+  },
+  {
+    id: "2027-data-center-business-plan",
+    label: "Data Center",
+    teamName: "Data Center",
+    title: "2027 Data Center Business Plan",
+  },
+  {
+    id: "2027-strategic-capital-business-plan",
+    label: "Strategic Capital",
+    teamName: "Strategic Capital",
+    title: "2027 Strategic Capital Business Plan",
+  },
+  {
+    id: "2027-ventures-business-plan",
+    label: "Ventures",
+    teamName: "Ventures",
+    title: "2027 Ventures Business Plan",
+  },
+] as const satisfies readonly BusinessPlanWorkstream[];
+
+export const DEFAULT_PLAN_ID = PLAN_ID;
+
 export const sectionDefaults = [
   {
     key: "summary",

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState, type Dispatch, type ReactNode, type SetStateAction } from "react";
+import { businessPlanWorkstreams } from "../lib/workspace-defaults";
 import type {
   Approver,
   EnablementFunction,
@@ -27,24 +28,18 @@ const sectionReadinessStatuses: SectionStatus[] = ["Draft", "Review"];
 const questionStatuses: QuestionStatus[] = ["Open", "Answered", "Resolved", "Reopened", "No Change Needed"];
 const enablementFunctions: EnablementFunction[] = ["HR", "Legal", "IT", "Finance & Accounting", "Tax", "Marketing", "CLS", "Other"];
 const approverPostures = ["Questions", "Approved"];
-const BUSINESS_PLAN_OPTIONS = [
-  "Essentials",
-  "Prologis Energy Solutions",
-  "Data Center",
-  "Strategic Capital",
-  "Ventures",
-] as const;
 const emptySections: MemoSection[] = [];
 const emptyQuestions: Question[] = [];
 const emptyApprovers: Approver[] = [];
 const currentUserEmail = "wodonnell@prologis.com";
+const defaultPlanId = businessPlanWorkstreams[0].id;
 
 export default function Home() {
   const [plan, setPlan] = useState<WorkspacePlan | null>(null);
+  const [activePlanId, setActivePlanId] = useState(defaultPlanId);
   const [role, setRole] = useState<Role>("Business Team");
   const [mode, setMode] = useState<Mode>("Section");
   const [activeId, setActiveId] = useState("");
-  const [teamName, setTeamName] = useState("");
   const [showGuidance, setShowGuidance] = useState(true);
   const [showCoach, setShowCoach] = useState(false);
   const [showHowTo, setShowHowTo] = useState(false);
@@ -73,9 +68,9 @@ export default function Home() {
   ).length;
   const currentApprover = approvers[0] ?? null;
   const currentApproverMode = currentApprover?.posture === "Approved" ? "Approved" : "Questions";
-  const selectedBusinessPlan = BUSINESS_PLAN_OPTIONS.includes(teamName as (typeof BUSINESS_PLAN_OPTIONS)[number])
-    ? teamName
-    : "Essentials";
+  const selectedBusinessPlan = businessPlanWorkstreams.some((workstream) => workstream.id === activePlanId)
+    ? activePlanId
+    : defaultPlanId;
 
   const visibleQuestions = useMemo(() => {
     if (!activeSection) return [];
@@ -116,8 +111,10 @@ export default function Home() {
 
   function applyPlan(nextPlan: WorkspacePlan, nextMessage: string) {
     setPlan(nextPlan);
-    setTeamName(nextPlan.teamName);
-    setActiveId((current) => current || nextPlan.sections[0]?.id || "");
+    setActivePlanId(nextPlan.id);
+    setActiveId((current) =>
+      nextPlan.sections.some((section) => section.id === current) ? current : nextPlan.sections[0]?.id || "",
+    );
     setResponseDrafts(Object.fromEntries(nextPlan.questions.map((question) => [question.id, question.response])));
     setSaveState("saved");
     setMessage(nextMessage);
@@ -126,7 +123,7 @@ export default function Home() {
   async function savePlan(patch: Partial<Pick<WorkspacePlan, "teamName" | "approvalState" | "approvalPosture">>) {
     const nextPlan = await requestPlan("/api/plan", {
       method: "PATCH",
-      body: JSON.stringify(patch),
+      body: JSON.stringify({ ...patch, planId: activePlanId }),
     });
     applyPlan(nextPlan, "Saved");
   }
@@ -134,7 +131,7 @@ export default function Home() {
   async function saveSection(section: MemoSection, patch: Partial<Pick<MemoSection, "content" | "status">>) {
     const nextPlan = await requestPlan(`/api/sections/${encodeURIComponent(section.id)}`, {
       method: "PATCH",
-      body: JSON.stringify(patch),
+      body: JSON.stringify({ ...patch, planId: activePlanId }),
     });
     applyPlan(nextPlan, "Saved");
   }
@@ -144,6 +141,7 @@ export default function Home() {
     const nextPlan = await requestPlan("/api/questions", {
       method: "POST",
       body: JSON.stringify({
+        planId: activePlanId,
         sectionId: activeSection.id,
         author: role === "Business Team" ? "Business Team" : role,
         role,
@@ -161,22 +159,24 @@ export default function Home() {
   async function saveQuestion(question: Question, patch: Partial<Pick<Question, "status" | "response">>) {
     const nextPlan = await requestPlan(`/api/questions/${encodeURIComponent(question.id)}`, {
       method: "PATCH",
-      body: JSON.stringify(patch),
+      body: JSON.stringify({ ...patch, planId: activePlanId }),
     });
     applyPlan(nextPlan, "Question saved");
   }
 
   async function removeQuestion(question: Question) {
     const nextPlan = await requestPlan(
-      `/api/questions/${encodeURIComponent(question.id)}?role=${encodeURIComponent(role)}`,
+      `/api/questions/${encodeURIComponent(question.id)}?role=${encodeURIComponent(role)}&planId=${encodeURIComponent(activePlanId)}`,
       { method: "DELETE" },
     );
     applyPlan(nextPlan, "Question deleted");
   }
 
-  async function changePlanSelection(nextTeamName: string) {
-    setTeamName(nextTeamName);
-    await savePlan({ teamName: nextTeamName });
+  async function changePlanSelection(nextPlanId: string) {
+    setActivePlanId(nextPlanId);
+    setActiveId("");
+    const nextPlan = await requestPlan(`/api/plan?planId=${encodeURIComponent(nextPlanId)}`);
+    applyPlan(nextPlan, "Loaded");
   }
 
   async function changeApproverMode(value: string) {
@@ -184,7 +184,7 @@ export default function Home() {
     const posture = value === "Approved" ? "Approved" : "Questions";
     const nextPlan = await requestPlan(`/api/approvers/${encodeURIComponent(currentApprover.id)}`, {
       method: "PATCH",
-      body: JSON.stringify({ posture }),
+      body: JSON.stringify({ planId: activePlanId, posture }),
     });
     applyPlan(nextPlan, posture === "Approved" ? "Approval saved" : "Question mode saved");
   }
@@ -225,7 +225,7 @@ export default function Home() {
       setSaveState("saving");
       setMessage("Loading...");
       try {
-        const nextPlan = await requestPlan("/api/plan");
+        const nextPlan = await requestPlan(`/api/plan?planId=${encodeURIComponent(defaultPlanId)}`);
         if (!cancelled) applyPlan(nextPlan, "Loaded");
       } catch (error) {
         if (!cancelled) {
@@ -267,8 +267,8 @@ export default function Home() {
                 <label className="plan-selector">
                   <span>Business plan view</span>
                   <select value={selectedBusinessPlan} onChange={(event) => void changePlanSelection(event.target.value)}>
-                    {BUSINESS_PLAN_OPTIONS.map((option) => (
-                      <option key={option} value={option}>{option}</option>
+                    {businessPlanWorkstreams.map((workstream) => (
+                      <option key={workstream.id} value={workstream.id}>{workstream.label}</option>
                     ))}
                   </select>
                 </label>
@@ -430,7 +430,6 @@ export default function Home() {
           <div className={`full-memo-layout full-memo-layout-${role.toLowerCase().replace(/\s+/g, "-")}`}>
             <FullMemo
               sections={sections}
-              questions={questions}
               title={planTitle}
               role={role}
               openDependencies={openDependencies}
@@ -808,13 +807,11 @@ function QuestionList({
 
 function FullMemo({
   sections,
-  questions,
   title,
   role,
   openDependencies,
 }: {
   sections: MemoSection[];
-  questions: Question[];
   title: string;
   role: Role;
   openDependencies: number;

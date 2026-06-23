@@ -7,7 +7,7 @@ export async function POST(request: Request) {
       ...input,
       requesterEmail: request.headers.get("oai-authenticated-user-email") ?? input.requesterEmail,
     });
-    return Response.json({ plan: await getWorkspacePlan() }, { status: 201 });
+    return Response.json({ plan: await getWorkspacePlan(input.planId) }, { status: 201 });
   } catch (error) {
     return Response.json({ error: toRouteErrorMessage(error) }, { status: 500 });
   }

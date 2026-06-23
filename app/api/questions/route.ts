@@ -2,8 +2,9 @@ import { createQuestion, getWorkspacePlan, toRouteErrorMessage } from "../../../
 
 export async function POST(request: Request) {
   try {
-    await createQuestion(await request.json());
-    return Response.json({ plan: await getWorkspacePlan() }, { status: 201 });
+    const input = await request.json();
+    await createQuestion(input);
+    return Response.json({ plan: await getWorkspacePlan(input.planId) }, { status: 201 });
   } catch (error) {
     return Response.json({ error: toRouteErrorMessage(error) }, { status: 500 });
   }

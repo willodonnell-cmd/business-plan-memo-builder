@@ -1,7 +1,8 @@
 import { getD1 } from "../db";
 import {
-  PLAN_ID,
+  DEFAULT_PLAN_ID,
   type Approver,
+  type BusinessPlanWorkstream,
   type EnablementFunction,
   type IssueType,
   type Question,
@@ -11,6 +12,7 @@ import {
   type Visibility,
   type WorkspacePlan,
   approverDefaults,
+  businessPlanWorkstreams,
   sectionDefaults,
 } from "./workspace-defaults";
 
@@ -75,17 +77,26 @@ export function toRouteErrorMessage(error: unknown) {
   return message;
 }
 
-export async function getWorkspacePlan(): Promise<WorkspacePlan> {
+export function resolvePlanId(value?: string | null) {
+  const requested = value?.trim();
+  return businessPlanWorkstreams.find((workstream) => workstream.id === requested)?.id ?? DEFAULT_PLAN_ID;
+}
+
+export function getWorkstreamByPlanId(planId: string): BusinessPlanWorkstream {
+  return businessPlanWorkstreams.find((workstream) => workstream.id === planId) ?? businessPlanWorkstreams[0];
+}
+
+export async function getWorkspacePlan(planIdInput?: string | null): Promise<WorkspacePlan> {
+  const planId = resolvePlanId(planIdInput);
   const d1 = getD1();
   await ensureSchema(d1);
-  await ensureDefaultWorkspace(d1);
-  await ensureApproverDefaults(d1);
+  await ensureDefaultWorkstreams(d1);
 
   const plan = await d1
     .prepare(
       "SELECT id, title, team_name, approval_state, approval_posture FROM business_plans WHERE id = ?",
     )
-    .bind(PLAN_ID)
+    .bind(planId)
     .first<BusinessPlanRow>();
 
   if (!plan) {
@@ -96,19 +107,19 @@ export async function getWorkspacePlan(): Promise<WorkspacePlan> {
     .prepare(
       "SELECT id, section_key, title, position, content, status FROM memo_sections WHERE plan_id = ? ORDER BY position ASC",
     )
-    .bind(PLAN_ID)
+    .bind(planId)
     .all<SectionRow>();
 
   const questions = await d1
     .prepare(
       "SELECT id, section_id, author_name, author_role, visibility, status, issue_type, function_name, body, response FROM section_questions WHERE plan_id = ? ORDER BY created_at DESC",
     )
-    .bind(PLAN_ID)
+    .bind(planId)
     .all<QuestionRow>();
 
   const approvers = await d1
     .prepare("SELECT id, name, title, posture FROM approvers WHERE plan_id = ? ORDER BY name ASC")
-    .bind(PLAN_ID)
+    .bind(planId)
     .all<ApproverRow>();
 
   return {
@@ -137,17 +148,19 @@ export async function getWorkspacePlan(): Promise<WorkspacePlan> {
 }
 
 export async function updatePlan(input: {
+  planId?: string;
   teamName?: string;
   approvalState?: SectionStatus;
   approvalPosture?: string;
 }) {
+  const planId = resolvePlanId(input.planId);
   const d1 = getD1();
   await ensureSchema(d1);
-  await ensureDefaultWorkspace(d1);
+  await ensureDefaultWorkstreams(d1);
 
   const current = await d1
     .prepare("SELECT team_name, approval_state, approval_posture FROM business_plans WHERE id = ?")
-    .bind(PLAN_ID)
+    .bind(planId)
     .first<{ team_name: string; approval_state: SectionStatus; approval_posture: string }>();
 
   const teamName = input.teamName?.trim() ?? current?.team_name ?? "";
@@ -159,21 +172,22 @@ export async function updatePlan(input: {
     .prepare(
       "UPDATE business_plans SET title = ?, team_name = ?, approval_state = ?, approval_posture = ?, updated_at = ? WHERE id = ?",
     )
-    .bind(title, teamName, approvalState, approvalPosture, Date.now(), PLAN_ID)
+    .bind(title, teamName, approvalState, approvalPosture, Date.now(), planId)
     .run();
 }
 
 export async function updateSection(
   id: string,
-  input: { content?: string; status?: SectionStatus },
+  input: { planId?: string; content?: string; status?: SectionStatus },
 ) {
+  const planId = resolvePlanId(input.planId);
   const d1 = getD1();
   await ensureSchema(d1);
-  await ensureDefaultWorkspace(d1);
+  await ensureDefaultWorkstreams(d1);
 
   const current = await d1
     .prepare("SELECT content, status FROM memo_sections WHERE id = ? AND plan_id = ?")
-    .bind(id, PLAN_ID)
+    .bind(id, planId)
     .first<{ content: string; status: SectionStatus }>();
 
   if (!current) {
@@ -182,11 +196,12 @@ export async function updateSection(
 
   await d1
     .prepare("UPDATE memo_sections SET content = ?, status = ?, updated_at = ? WHERE id = ? AND plan_id = ?")
-    .bind(input.content ?? current.content, normalize(input.status, allowedSectionStatuses, current.status), Date.now(), id, PLAN_ID)
+    .bind(input.content ?? current.content, normalize(input.status, allowedSectionStatuses, current.status), Date.now(), id, planId)
     .run();
 }
 
 export async function createQuestion(input: {
+  planId?: string;
   sectionId?: string;
   author?: string;
   role?: Role;
@@ -195,9 +210,10 @@ export async function createQuestion(input: {
   functionName?: EnablementFunction | "";
   body?: string;
 }) {
+  const planId = resolvePlanId(input.planId);
   const d1 = getD1();
   await ensureSchema(d1);
-  await ensureDefaultWorkspace(d1);
+  await ensureDefaultWorkstreams(d1);
 
   const sectionId = input.sectionId?.trim() ?? "";
   const body = input.body?.trim() ?? "";
@@ -207,7 +223,7 @@ export async function createQuestion(input: {
 
   const section = await d1
     .prepare("SELECT id FROM memo_sections WHERE id = ? AND plan_id = ?")
-    .bind(sectionId, PLAN_ID)
+    .bind(sectionId, planId)
     .first<{ id: string }>();
 
   if (!section) {
@@ -222,7 +238,7 @@ export async function createQuestion(input: {
     )
     .bind(
       crypto.randomUUID(),
-      PLAN_ID,
+      planId,
       sectionId,
       input.author?.trim() || authorForRole(role),
       role,
@@ -240,15 +256,16 @@ export async function createQuestion(input: {
 
 export async function updateQuestion(
   id: string,
-  input: { status?: QuestionStatus; response?: string },
+  input: { planId?: string; status?: QuestionStatus; response?: string },
 ) {
+  const planId = resolvePlanId(input.planId);
   const d1 = getD1();
   await ensureSchema(d1);
-  await ensureDefaultWorkspace(d1);
+  await ensureDefaultWorkstreams(d1);
 
   const current = await d1
     .prepare("SELECT status, response FROM section_questions WHERE id = ? AND plan_id = ?")
-    .bind(id, PLAN_ID)
+    .bind(id, planId)
     .first<{ status: QuestionStatus; response: string | null }>();
 
   if (!current) {
@@ -262,19 +279,20 @@ export async function updateQuestion(
       input.response ?? current.response,
       Date.now(),
       id,
-      PLAN_ID,
+      planId,
     )
     .run();
 }
 
-export async function deleteQuestion(id: string, role?: Role) {
+export async function deleteQuestion(id: string, planIdInput?: string | null, role?: Role) {
+  const planId = resolvePlanId(planIdInput);
   const d1 = getD1();
   await ensureSchema(d1);
-  await ensureDefaultWorkspace(d1);
+  await ensureDefaultWorkstreams(d1);
 
   const question = await d1
     .prepare("SELECT author_role FROM section_questions WHERE id = ? AND plan_id = ?")
-    .bind(id, PLAN_ID)
+    .bind(id, planId)
     .first<{ author_role: Role }>();
 
   if (!question) {
@@ -286,14 +304,14 @@ export async function deleteQuestion(id: string, role?: Role) {
     throw new Error("Only the submitting role or Business Team can delete this question.");
   }
 
-  await d1.prepare("DELETE FROM section_questions WHERE id = ? AND plan_id = ?").bind(id, PLAN_ID).run();
+  await d1.prepare("DELETE FROM section_questions WHERE id = ? AND plan_id = ?").bind(id, planId).run();
 }
 
-export async function createApprover(input: { name?: string; title?: string; posture?: string; requesterEmail?: string }) {
+export async function createApprover(input: { planId?: string; name?: string; title?: string; posture?: string; requesterEmail?: string }) {
+  const planId = resolvePlanId(input.planId);
   const d1 = getD1();
   await ensureSchema(d1);
-  await ensureDefaultWorkspace(d1);
-  await ensureApproverDefaults(d1);
+  await ensureDefaultWorkstreams(d1);
 
   if (input.requesterEmail?.trim().toLowerCase() !== adminEmail) {
     throw new Error("Only Will can add approvers.");
@@ -310,8 +328,8 @@ export async function createApprover(input: { name?: string; title?: string; pos
       "INSERT INTO approvers (id, plan_id, name, title, posture, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
     )
     .bind(
-      `${PLAN_ID}-approver-${slug(name)}-${now}`,
-      PLAN_ID,
+      `${planId}-approver-${slug(name)}-${now}`,
+      planId,
       name,
       input.title?.trim() || "Approver",
       input.posture?.trim() || "Reviewing",
@@ -320,10 +338,11 @@ export async function createApprover(input: { name?: string; title?: string; pos
     .run();
 }
 
-export async function updateApprover(id: string, input: { posture?: string }) {
+export async function updateApprover(id: string, input: { planId?: string; posture?: string }) {
+  const planId = resolvePlanId(input.planId);
   const d1 = getD1();
   await ensureSchema(d1);
-  await ensureDefaultWorkspace(d1);
+  await ensureDefaultWorkstreams(d1);
 
   const posture = input.posture?.trim();
   if (!posture) {
@@ -332,7 +351,7 @@ export async function updateApprover(id: string, input: { posture?: string }) {
 
   const result = await d1
     .prepare("UPDATE approvers SET posture = ?, updated_at = ? WHERE id = ? AND plan_id = ?")
-    .bind(posture, Date.now(), id, PLAN_ID)
+    .bind(posture, Date.now(), id, planId)
     .run();
 
   if (!result.meta.rows_written) {
@@ -360,19 +379,21 @@ async function ensureSchema(d1: D1Database) {
   await backfillSectionKeys(d1);
 }
 
-async function ensureDefaultWorkspace(d1: D1Database) {
+async function ensureDefaultWorkspace(d1: D1Database, planId: string) {
+  const workstream = getWorkstreamByPlanId(planId);
   const existing = await d1
     .prepare("SELECT id, title, team_name FROM business_plans WHERE id = ?")
-    .bind(PLAN_ID)
+    .bind(planId)
     .first<{ id: string; title: string; team_name: string }>();
 
   if (existing) {
-    if (existing.title.includes("[Team Name]") || !existing.team_name) {
+    if (shouldRestoreWorkstreamIdentity(existing, workstream)) {
       await d1
         .prepare("UPDATE business_plans SET title = ?, team_name = ?, updated_at = ? WHERE id = ?")
-        .bind("2027 Essentials Business Plan", "Essentials", Date.now(), PLAN_ID)
+        .bind(workstream.title, workstream.teamName, Date.now(), planId)
         .run();
     }
+    await ensureSectionDefaults(d1, planId);
     return;
   }
 
@@ -382,28 +403,85 @@ async function ensureDefaultWorkspace(d1: D1Database) {
       .prepare(
         "INSERT INTO business_plans (id, title, team_name, approval_state, approval_posture, created_by, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
       )
-      .bind(PLAN_ID, "2027 Essentials Business Plan", "Essentials", "Draft", "Drafting", null, now),
+      .bind(planId, workstream.title, workstream.teamName, "Draft", "Drafting", null, now),
     ...sectionDefaults.map((section, index) =>
       d1
         .prepare(
           "INSERT INTO memo_sections (id, plan_id, section_key, title, position, content, status, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
         )
-        .bind(`${PLAN_ID}-${section.key}`, PLAN_ID, section.key, section.title, index + 1, section.content, section.status, now),
+        .bind(`${planId}-${section.key}`, planId, section.key, section.title, index + 1, section.content, section.status, now),
     ),
     ...approverDefaults.map((approver) =>
       d1
         .prepare(
           "INSERT INTO approvers (id, plan_id, name, title, posture, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
         )
-        .bind(`${PLAN_ID}-approver-${slug(approver.name)}`, PLAN_ID, approver.name, approver.title, approver.posture, now),
+        .bind(`${planId}-approver-${slug(approver.name)}`, planId, approver.name, approver.title, approver.posture, now),
     ),
   ]);
 }
 
-async function ensureApproverDefaults(d1: D1Database) {
+async function ensureDefaultWorkstreams(d1: D1Database) {
+  for (const workstream of businessPlanWorkstreams) {
+    await ensureDefaultWorkspace(d1, workstream.id);
+    await ensureApproverDefaults(d1, workstream.id);
+  }
+}
+
+function shouldRestoreWorkstreamIdentity(
+  existing: { title: string; team_name: string },
+  workstream: BusinessPlanWorkstream,
+) {
+  if (existing.title.includes("[Team Name]") || !existing.team_name) {
+    return true;
+  }
+  if (existing.title === workstream.title && existing.team_name === workstream.teamName) {
+    return false;
+  }
+  return businessPlanWorkstreams.some(
+    (item) =>
+      item.id !== workstream.id &&
+      (existing.title === item.title || existing.team_name === item.teamName),
+  );
+}
+
+async function ensureSectionDefaults(d1: D1Database, planId: string) {
+  const rows = await d1
+    .prepare("SELECT section_key FROM memo_sections WHERE plan_id = ?")
+    .bind(planId)
+    .all<{ section_key?: string | null }>();
+
+  const existingKeys = new Set((rows.results ?? []).map((row) => row.section_key).filter(Boolean));
+  const missingSections = sectionDefaults.filter((section) => !existingKeys.has(section.key));
+  if (missingSections.length === 0) {
+    return;
+  }
+
+  const now = Date.now();
+  await d1.batch(
+    missingSections.map((section) =>
+      d1
+        .prepare(
+          "INSERT INTO memo_sections (id, plan_id, section_key, title, position, content, status, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(
+          `${planId}-${section.key}`,
+          planId,
+          section.key,
+          section.title,
+          sectionDefaults.findIndex((item) => item.key === section.key) + 1,
+          section.content,
+          section.status,
+          now,
+        ),
+    ),
+  );
+}
+
+async function ensureApproverDefaults(d1: D1Database, planId: string) {
   const rows = await d1
     .prepare("SELECT id, name FROM approvers WHERE plan_id = ?")
-    .bind(PLAN_ID)
+    .bind(planId)
     .all<{ id: string; name: string }>();
 
   const existingNames = new Set((rows.results ?? []).map((row) => row.name));
@@ -413,7 +491,7 @@ async function ensureApproverDefaults(d1: D1Database) {
   for (const name of placeholderApproverNames) {
     if (existingNames.has(name)) {
       statements.push(
-        d1.prepare("DELETE FROM approvers WHERE plan_id = ? AND name = ?").bind(PLAN_ID, name),
+        d1.prepare("DELETE FROM approvers WHERE plan_id = ? AND name = ?").bind(planId, name),
       );
     }
   }
@@ -425,7 +503,7 @@ async function ensureApproverDefaults(d1: D1Database) {
           .prepare(
             "INSERT INTO approvers (id, plan_id, name, title, posture, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
           )
-          .bind(`${PLAN_ID}-approver-${slug(approver.name)}`, PLAN_ID, approver.name, approver.title, approver.posture, now),
+          .bind(`${planId}-approver-${slug(approver.name)}`, planId, approver.name, approver.title, approver.posture, now),
       );
     }
   }
@@ -433,7 +511,7 @@ async function ensureApproverDefaults(d1: D1Database) {
   statements.push(
     d1
       .prepare("UPDATE approvers SET posture = ?, updated_at = ? WHERE plan_id = ? AND posture IN (?, ?, ?)")
-      .bind("Needs Revision", now, PLAN_ID, "Reviewing", "Needs answers", "Supportive"),
+      .bind("Needs Revision", now, planId, "Reviewing", "Needs answers", "Supportive"),
   );
 
   if (statements.length > 0) {
@@ -479,9 +557,8 @@ async function addColumnIfMissing(d1: D1Database, table: string, column: string,
 
 async function backfillSectionKeys(d1: D1Database) {
   const rows = await d1
-    .prepare("SELECT id, title, position, section_key FROM memo_sections WHERE plan_id = ? ORDER BY position ASC")
-    .bind(PLAN_ID)
-    .all<{ id: string; title: string; position: number; section_key?: string | null }>();
+    .prepare("SELECT id, plan_id, title, position, section_key FROM memo_sections ORDER BY plan_id ASC, position ASC")
+    .all<{ id: string; plan_id: string; title: string; position: number; section_key?: string | null }>();
 
   const updates = [];
 
@@ -499,7 +576,7 @@ async function backfillSectionKeys(d1: D1Database) {
     }
 
     updates.push(
-      d1.prepare("UPDATE memo_sections SET section_key = ? WHERE id = ? AND plan_id = ?").bind(resolvedKey, row.id, PLAN_ID),
+      d1.prepare("UPDATE memo_sections SET section_key = ? WHERE id = ? AND plan_id = ?").bind(resolvedKey, row.id, row.plan_id),
     );
   }
 
