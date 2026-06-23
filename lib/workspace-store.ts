@@ -362,7 +362,7 @@ export async function updateApprover(id: string, input: { planId?: string; postu
 async function ensureSchema(d1: D1Database) {
   const statements = [
     "CREATE TABLE IF NOT EXISTS business_plans (id text PRIMARY KEY NOT NULL, title text NOT NULL, team_name text NOT NULL, approval_state text DEFAULT 'Draft' NOT NULL, approval_posture text DEFAULT 'Drafting' NOT NULL, created_by text, updated_at integer NOT NULL)",
-    "CREATE TABLE IF NOT EXISTS memo_sections (id text PRIMARY KEY NOT NULL, plan_id text NOT NULL, section_key text NOT NULL, title text NOT NULL, position integer NOT NULL, content text DEFAULT '' NOT NULL, status text DEFAULT 'Draft' NOT NULL, updated_at integer NOT NULL, FOREIGN KEY (plan_id) REFERENCES business_plans(id) ON DELETE cascade)",
+    "CREATE TABLE IF NOT EXISTS memo_sections (id text PRIMARY KEY NOT NULL, plan_id text NOT NULL, section_key text NOT NULL, title text NOT NULL, position integer NOT NULL, requirement text DEFAULT '' NOT NULL, content text DEFAULT '' NOT NULL, status text DEFAULT 'Draft' NOT NULL, updated_at integer NOT NULL, FOREIGN KEY (plan_id) REFERENCES business_plans(id) ON DELETE cascade)",
     "CREATE TABLE IF NOT EXISTS section_questions (id text PRIMARY KEY NOT NULL, plan_id text NOT NULL, section_id text NOT NULL, author_name text NOT NULL, author_role text NOT NULL, visibility text DEFAULT 'Public' NOT NULL, status text DEFAULT 'Open' NOT NULL, issue_type text DEFAULT 'Clarification' NOT NULL, function_name text DEFAULT '' NOT NULL, body text NOT NULL, response text, created_at integer NOT NULL, updated_at integer NOT NULL, FOREIGN KEY (plan_id) REFERENCES business_plans(id) ON DELETE cascade, FOREIGN KEY (section_id) REFERENCES memo_sections(id) ON DELETE cascade)",
     "CREATE TABLE IF NOT EXISTS approvers (id text PRIMARY KEY NOT NULL, plan_id text NOT NULL, name text NOT NULL, title text NOT NULL, posture text DEFAULT 'Reviewing' NOT NULL, updated_at integer NOT NULL, FOREIGN KEY (plan_id) REFERENCES business_plans(id) ON DELETE cascade)",
   ];
@@ -375,6 +375,7 @@ async function ensureSchema(d1: D1Database) {
   await addColumnIfMissing(d1, "business_plans", "approval_posture", "text DEFAULT 'Drafting' NOT NULL");
   await addColumnIfMissing(d1, "business_plans", "created_by", "text");
   await addColumnIfMissing(d1, "memo_sections", "section_key", "text");
+  await addColumnIfMissing(d1, "memo_sections", "requirement", "text DEFAULT '' NOT NULL");
   await addColumnIfMissing(d1, "section_questions", "issue_type", "text DEFAULT 'Clarification' NOT NULL");
   await addColumnIfMissing(d1, "section_questions", "function_name", "text DEFAULT '' NOT NULL");
   await backfillSectionKeys(d1);
@@ -408,9 +409,19 @@ async function ensureDefaultWorkspace(d1: D1Database, planId: string) {
     ...sectionDefaults.map((section, index) =>
       d1
         .prepare(
-          "INSERT INTO memo_sections (id, plan_id, section_key, title, position, content, status, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+          "INSERT INTO memo_sections (id, plan_id, section_key, title, position, requirement, content, status, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
-        .bind(`${planId}-${section.key}`, planId, section.key, section.title, index + 1, section.content, section.status, now),
+        .bind(
+          `${planId}-${section.key}`,
+          planId,
+          section.key,
+          section.title,
+          index + 1,
+          section.format,
+          section.content,
+          section.status,
+          now,
+        ),
     ),
     ...approverDefaults.map((approver) =>
       d1
@@ -463,7 +474,7 @@ async function ensureSectionDefaults(d1: D1Database, planId: string) {
     missingSections.map((section) =>
       d1
         .prepare(
-          "INSERT INTO memo_sections (id, plan_id, section_key, title, position, content, status, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+          "INSERT INTO memo_sections (id, plan_id, section_key, title, position, requirement, content, status, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(
           `${planId}-${section.key}`,
@@ -471,6 +482,7 @@ async function ensureSectionDefaults(d1: D1Database, planId: string) {
           section.key,
           section.title,
           sectionDefaults.findIndex((item) => item.key === section.key) + 1,
+          section.format,
           section.content,
           section.status,
           now,
