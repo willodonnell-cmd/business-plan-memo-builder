@@ -940,7 +940,71 @@ function guidanceBullets(section: MemoSection) {
       "What is this business trying to become in 2027?",
       "Why does it matter to Prologis?",
       "What is the core business thesis?",
-      "What are the 3-5 most important takeaways from the plan?",
+      "Then provide 3-5 bullets that summarize the most important takeaways from the plan.",
+    ];
+  }
+  if (section.title === "2027 Priorities") {
+    return [
+      "What is the priority?",
+      "Why is it a priority in 2027?",
+      "What decision or action does it require?",
+      "What is the expected outcome if we execute well?",
+      "Only include priorities that are critical to the success of the business. This section should force prioritization, not document every initiative underway.",
+    ];
+  }
+  if (section.title === "Growth Opportunities") {
+    return [
+      "What is the opportunity?",
+      "How large could the opportunity become?",
+      "What customer need does it address?",
+      "Why does Prologis have a right to win or a right to play?",
+      "What would need to happen for the opportunity to scale?",
+      "Focus on opportunities that could meaningfully impact the business over the next several years.",
+    ];
+  }
+  if (section.title === "Support Needed from the Company") {
+    return [
+      "What approvals are needed?",
+      "What organizational support is required?",
+      "What cross-functional dependencies matter most?",
+      "What decisions or actions would accelerate progress?",
+      "What could slow execution if not addressed?",
+      "Be specific and direct.",
+    ];
+  }
+  if (section.title === "AI and Productivity Strategy") {
+    return [
+      "How will AI be incorporated into the team's operating model?",
+      "What activities will be automated, accelerated, or augmented?",
+      "What measurable efficiency gains are expected?",
+      "How will AI improve decision-making, customer engagement, analysis, or execution?",
+      "How does AI influence the team's future hiring strategy?",
+    ];
+  }
+  if (section.title === "Headcount Needs") {
+    return [
+      "What role or capability is needed?",
+      "What business problem does it solve?",
+      "Why is it needed now?",
+      "How does it support revenue growth, execution speed, or risk reduction?",
+      "What is the expected return on the investment?",
+      "Every request should have a clear business rationale.",
+    ];
+  }
+  if (section.title === "Key Risks and Dependencies") {
+    return [
+      "What are the biggest risks?",
+      "What assumptions must prove true?",
+      "What dependencies exist inside or outside Prologis?",
+      "What would cause us to slow down, change course, or stop?",
+      "Only include risks that matter to the approval decision.",
+    ];
+  }
+  if (section.title === "Bottom-Line Ask") {
+    return [
+      "What are we asking leadership to approve?",
+      "What are the key drivers of success in 2027?",
+      "What is the most important takeaway from the plan?",
     ];
   }
   return [section.prompt, section.emphasize, section.avoid];
