@@ -183,6 +183,6 @@ export const sectionDefaults = [
 ];
 
 export const approverDefaults = [
-  { name: "Dan Letter", title: "Approver", posture: "Needs Revision" },
-  { name: "Tim Arndt", title: "Approver", posture: "Needs Revision" },
+  { name: "Dan Letter", title: "Approver", posture: "Questions" },
+  { name: "Tim Arndt", title: "Approver", posture: "Questions" },
 ];

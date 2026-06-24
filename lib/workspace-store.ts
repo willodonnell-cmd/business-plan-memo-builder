@@ -69,6 +69,7 @@ const allowedVisibility = ["Public", "Draft", "Private"] as const;
 const placeholderApproverNames = ["M. Rivera", "A. Chen", "S. Williams"];
 const adminEmail = "wodonnell@prologis.com";
 const cleanMemoContentMarker = "2026-06-23-clean-memo-section-content";
+const cleanWorkflowTestDataMarker = "2026-06-24-clean-workflow-test-data";
 
 export function toRouteErrorMessage(error: unknown) {
   const message = error instanceof Error ? error.message : "Unexpected error";
@@ -382,6 +383,7 @@ async function ensureSchema(d1: D1Database) {
   await addColumnIfMissing(d1, "section_questions", "function_name", "text DEFAULT '' NOT NULL");
   await backfillSectionKeys(d1);
   await clearExistingMemoContentOnce(d1);
+  await clearWorkflowTestDataOnce(d1);
 }
 
 async function ensureDefaultWorkspace(d1: D1Database, planId: string) {
@@ -591,6 +593,36 @@ async function clearExistingMemoContentOnce(d1: D1Database) {
     d1
       .prepare("INSERT INTO app_meta (key, value, updated_at) VALUES (?, ?, ?)")
       .bind(cleanMemoContentMarker, "done", now),
+  ]);
+}
+
+async function clearWorkflowTestDataOnce(d1: D1Database) {
+  const existing = await d1
+    .prepare("SELECT key FROM app_meta WHERE key = ?")
+    .bind(cleanWorkflowTestDataMarker)
+    .first<{ key: string }>();
+
+  if (existing) {
+    return;
+  }
+
+  const now = Date.now();
+  await d1.batch([
+    ...businessPlanWorkstreams.flatMap((workstream) => [
+      d1
+        .prepare("UPDATE memo_sections SET content = '', updated_at = ? WHERE plan_id = ?")
+        .bind(now, workstream.id),
+      d1.prepare("DELETE FROM section_questions WHERE plan_id = ?").bind(workstream.id),
+      d1.prepare("DELETE FROM approvers WHERE plan_id = ?").bind(workstream.id),
+      d1
+        .prepare(
+          "UPDATE business_plans SET approval_state = ?, approval_posture = ?, updated_at = ? WHERE id = ?",
+        )
+        .bind("Draft", "Drafting", now, workstream.id),
+    ]),
+    d1
+      .prepare("INSERT INTO app_meta (key, value, updated_at) VALUES (?, ?, ?)")
+      .bind(cleanWorkflowTestDataMarker, "done", now),
   ]);
 }
 
