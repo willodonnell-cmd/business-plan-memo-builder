@@ -107,8 +107,7 @@ export const sectionDefaults = [
     format: "One tight page opener with the recommendation, facts that matter, and implications.",
     emphasize: "Decision readiness, confidence level, and what changes if leadership approves the plan.",
     avoid: "Background history, long process explanation, and unsupported claims.",
-    content:
-      "Recommend approving the 2027 plan for the team once open dependencies and company support needs are resolved. The plan should make the strategic choices explicit, show where growth is expected, and identify the few decisions leadership must make now.",
+    content: "",
     status: "Review" as SectionStatus,
   },
   {
@@ -118,8 +117,7 @@ export const sectionDefaults = [
     format: "Three to five priorities with outcomes, owners, and decision implications.",
     emphasize: "Tradeoffs, sequencing, measurable outcomes, and what will not be prioritized.",
     avoid: "Task lists, generic objectives, and priorities without accountable owners.",
-    content:
-      "1. Focus resources on the highest-conviction markets and customer segments.\n2. Standardize the operating rhythm for cross-functional planning.\n3. Use AI and automation to remove repeatable coordination work from the team.",
+    content: "",
     status: "Review" as SectionStatus,
   },
   {

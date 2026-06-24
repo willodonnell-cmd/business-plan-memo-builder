@@ -68,6 +68,7 @@ const allowedRoles = ["Business Team", "Enablement", "Approver"] as const;
 const allowedVisibility = ["Public", "Draft", "Private"] as const;
 const placeholderApproverNames = ["M. Rivera", "A. Chen", "S. Williams"];
 const adminEmail = "wodonnell@prologis.com";
+const cleanMemoContentMarker = "2026-06-23-clean-memo-section-content";
 
 export function toRouteErrorMessage(error: unknown) {
   const message = error instanceof Error ? error.message : "Unexpected error";
@@ -365,6 +366,7 @@ async function ensureSchema(d1: D1Database) {
     "CREATE TABLE IF NOT EXISTS memo_sections (id text PRIMARY KEY NOT NULL, plan_id text NOT NULL, section_key text NOT NULL, title text NOT NULL, position integer NOT NULL, requirement text DEFAULT '' NOT NULL, content text DEFAULT '' NOT NULL, status text DEFAULT 'Draft' NOT NULL, updated_at integer NOT NULL, FOREIGN KEY (plan_id) REFERENCES business_plans(id) ON DELETE cascade)",
     "CREATE TABLE IF NOT EXISTS section_questions (id text PRIMARY KEY NOT NULL, plan_id text NOT NULL, section_id text NOT NULL, author_name text NOT NULL, author_role text NOT NULL, visibility text DEFAULT 'Public' NOT NULL, status text DEFAULT 'Open' NOT NULL, issue_type text DEFAULT 'Clarification' NOT NULL, function_name text DEFAULT '' NOT NULL, body text NOT NULL, response text, created_at integer NOT NULL, updated_at integer NOT NULL, FOREIGN KEY (plan_id) REFERENCES business_plans(id) ON DELETE cascade, FOREIGN KEY (section_id) REFERENCES memo_sections(id) ON DELETE cascade)",
     "CREATE TABLE IF NOT EXISTS approvers (id text PRIMARY KEY NOT NULL, plan_id text NOT NULL, name text NOT NULL, title text NOT NULL, posture text DEFAULT 'Reviewing' NOT NULL, updated_at integer NOT NULL, FOREIGN KEY (plan_id) REFERENCES business_plans(id) ON DELETE cascade)",
+    "CREATE TABLE IF NOT EXISTS app_meta (key text PRIMARY KEY NOT NULL, value text NOT NULL, updated_at integer NOT NULL)",
   ];
 
   for (const statement of statements) {
@@ -379,6 +381,7 @@ async function ensureSchema(d1: D1Database) {
   await addColumnIfMissing(d1, "section_questions", "issue_type", "text DEFAULT 'Clarification' NOT NULL");
   await addColumnIfMissing(d1, "section_questions", "function_name", "text DEFAULT '' NOT NULL");
   await backfillSectionKeys(d1);
+  await clearExistingMemoContentOnce(d1);
 }
 
 async function ensureDefaultWorkspace(d1: D1Database, planId: string) {
@@ -566,6 +569,29 @@ async function addColumnIfMissing(d1: D1Database, table: string, column: string,
     return;
   }
   await d1.prepare(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`).run();
+}
+
+async function clearExistingMemoContentOnce(d1: D1Database) {
+  const existing = await d1
+    .prepare("SELECT key FROM app_meta WHERE key = ?")
+    .bind(cleanMemoContentMarker)
+    .first<{ key: string }>();
+
+  if (existing) {
+    return;
+  }
+
+  const now = Date.now();
+  await d1.batch([
+    ...businessPlanWorkstreams.map((workstream) =>
+      d1
+        .prepare("UPDATE memo_sections SET content = '', updated_at = ? WHERE plan_id = ?")
+        .bind(now, workstream.id),
+    ),
+    d1
+      .prepare("INSERT INTO app_meta (key, value, updated_at) VALUES (?, ?, ?)")
+      .bind(cleanMemoContentMarker, "done", now),
+  ]);
 }
 
 async function backfillSectionKeys(d1: D1Database) {
