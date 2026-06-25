@@ -108,7 +108,7 @@ export const sectionDefaults = [
     emphasize: "3-5 bullets",
     avoid: "Background history, long process explanation, and unsupported claims.",
     content: "",
-    status: "Review" as SectionStatus,
+    status: "Draft" as SectionStatus,
   },
   {
     key: "priorities",
@@ -118,7 +118,7 @@ export const sectionDefaults = [
     emphasize: "For each priority: Priority name; 2-3 bullets answering the questions above",
     avoid: "Task lists, generic objectives, and priorities without accountable owners.",
     content: "",
-    status: "Review" as SectionStatus,
+    status: "Draft" as SectionStatus,
   },
   {
     key: "growth",

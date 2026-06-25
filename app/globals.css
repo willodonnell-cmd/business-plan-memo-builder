@@ -450,6 +450,21 @@ textarea:focus {
   background: #fff4e6;
 }
 
+.section-status-draft {
+  background: #fff4e6;
+  color: #8f4c16;
+}
+
+.section-status-review {
+  background: #edf5ed;
+  color: var(--green-dark);
+}
+
+.section-status-approved {
+  background: #eaf4ff;
+  color: #23527c;
+}
+
 .draft-content-button {
   min-height: 30px;
   border: 1px solid #d9d5ca;
@@ -537,6 +552,47 @@ textarea:focus {
 
 .guidance-card li + li {
   margin-top: 8px;
+}
+
+.how-to-card {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fbfaf6;
+  padding: 12px;
+  color: #3f403a;
+  font-size: 0.88rem;
+  line-height: 1.55;
+}
+
+.how-to-card ol {
+  margin: 8px 0 10px;
+  padding-left: 18px;
+}
+
+.how-to-card li + li {
+  margin-top: 6px;
+}
+
+.how-to-card p:last-child {
+  margin: 0;
+  color: #5f5b52;
+}
+
+.empty-workflow-state {
+  min-height: 320px;
+  padding: 30px;
+}
+
+.empty-workflow-state h2 {
+  margin-top: 8px;
+  font-size: 1.6rem;
+  font-weight: 800;
+}
+
+.empty-workflow-state p:last-child {
+  margin-top: 10px;
+  max-width: 560px;
+  color: var(--muted);
 }
 
 .coach-button {

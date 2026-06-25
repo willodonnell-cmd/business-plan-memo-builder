@@ -24,7 +24,6 @@ type ApiPlanResponse = {
 type SaveState = "idle" | "saving" | "saved" | "error";
 
 const roles: Role[] = ["Business Team", "Enablement", "Approver"];
-const sectionReadinessStatuses: SectionStatus[] = ["Draft", "Review"];
 const enablementFunctions: EnablementFunction[] = ["HR", "Legal", "IT", "Finance & Accounting", "Tax", "Marketing", "CLS", "Other"];
 const approverPostures = ["Questions", "Approved"];
 const emptySections: MemoSection[] = [];
@@ -49,6 +48,18 @@ function questionStatusOptions(role: Role, currentStatus: QuestionStatus) {
   return options.includes(currentStatus) ? options : [currentStatus, ...options];
 }
 
+function sectionIsVisibleToRole(section: MemoSection, role: Role) {
+  if (role === "Business Team") return true;
+  if (role === "Enablement") return section.status === "Review" || section.status === "Approved";
+  return section.status === "Approved";
+}
+
+function sectionStatusLabel(status: SectionStatus) {
+  if (status === "Review") return "For Review";
+  if (status === "Approved") return "For Approval";
+  return "Draft";
+}
+
 export default function Home() {
   const [plan, setPlan] = useState<WorkspacePlan | null>(null);
   const [activePlanId, setActivePlanId] = useState(defaultPlanId);
@@ -71,12 +82,17 @@ export default function Home() {
   const sections = plan?.sections ?? emptySections;
   const questions = plan?.questions ?? emptyQuestions;
   const approvers = plan?.approvers ?? emptyApprovers;
-  const activeSection = sections.find((section) => section.id === activeId) ?? sections[0] ?? null;
+  const visibleSections = useMemo(
+    () => sections.filter((section) => sectionIsVisibleToRole(section, role)),
+    [sections, role],
+  );
+  const activeSection = visibleSections.find((section) => section.id === activeId) ?? visibleSections[0] ?? null;
   const planTitle = plan?.title ?? "2027 Essentials Business Plan";
   const openQuestions = questions.filter((question) => isOpenQuestionStatus(question.status)).length;
   const approvedCount = approvers.filter((approver) => approver.posture === "Approved").length;
   const sectionIndex = activeSection ? sections.findIndex((section) => section.id === activeSection.id) + 1 : 1;
-  const inReviewCount = sections.filter((section) => section.status !== "Draft").length;
+  const inReviewCount = sections.filter((section) => section.status === "Review" || section.status === "Approved").length;
+  const inApprovalCount = sections.filter((section) => section.status === "Approved").length;
   const openDependencies = questions.filter(
     (question) =>
       isOpenQuestionStatus(question.status) &&
@@ -99,12 +115,14 @@ export default function Home() {
   }, [activeSection, questions, role]);
 
   const allVisibleQuestions = useMemo(() => {
+    const visibleSectionIds = new Set(visibleSections.map((section) => section.id));
     return questions.filter((question) => {
+      if (!visibleSectionIds.has(question.sectionId)) return false;
       if (role === "Business Team") return question.visibility !== "Draft" || question.role === role;
       if (question.visibility === "Public") return true;
       return question.role === role;
     });
-  }, [questions, role]);
+  }, [questions, role, visibleSections]);
 
   async function requestPlan(path: string, init?: RequestInit) {
     setSaveState("saving");
@@ -137,14 +155,6 @@ export default function Home() {
     if (nextMessage !== "Loaded") {
       setShowSavedToast(true);
     }
-  }
-
-  async function savePlan(patch: Partial<Pick<WorkspacePlan, "teamName" | "approvalState" | "approvalPosture">>) {
-    const nextPlan = await requestPlan("/api/plan", {
-      method: "PATCH",
-      body: JSON.stringify({ ...patch, planId: activePlanId }),
-    });
-    applyPlan(nextPlan, "Saved");
   }
 
   async function saveSection(section: MemoSection, patch: Partial<Pick<MemoSection, "content" | "status">>) {
@@ -272,7 +282,7 @@ export default function Home() {
     return () => window.clearTimeout(timeout);
   }, [showSavedToast]);
 
-  if (!plan || !activeSection) {
+  if (!plan) {
     return (
       <main className="grid min-h-screen place-items-center bg-[#f7f5ef] px-5 text-[#161712]">
         <div className="card max-w-md p-6">
@@ -303,7 +313,6 @@ export default function Home() {
                     ))}
                   </select>
                 </label>
-                <p className="site-subtitle text-[#756f64]">Strategic business plan memo workspace</p>
               </div>
             </div>
           </div>
@@ -356,111 +365,114 @@ export default function Home() {
         {mode === "Section" ? (
           <div className="section-layout">
             <MemoOutline
-              sections={sections}
+              sections={visibleSections}
               questions={questions}
-              activeId={activeSection.id}
+              activeId={activeSection?.id ?? ""}
               inReviewCount={inReviewCount}
+              inApprovalCount={inApprovalCount}
               onSelect={(id) => setActiveId(id)}
             />
-            <section className="section-shell">
-              <div className="section-header">
-                <div>
-                  <p className="eyebrow">Section {sectionIndex}</p>
-                  <h2 className="mt-2 text-3xl font-bold">{activeSection.title}</h2>
-                  <p className="mt-2 text-base text-[#69665c]">{sectionSubtitle(activeSection)}</p>
-                </div>
-              </div>
-
-              <div className="section-editor-layout">
-                <div className="editor-pane">
-                  <div className="mb-3 flex items-center justify-between gap-3">
-                    <div className="flex flex-wrap gap-2">
-                      {sectionReadinessStatuses.map((status) => (
-                        <button
-                          key={status}
-                          className={`small-status ${activeSection.status === status ? "small-status-active" : ""}`}
-                          onClick={() => void saveSection(activeSection, { status })}
-                        >
-                          {status}
-                        </button>
-                      ))}
-                    </div>
-                    <div className="section-actions">
-                      <button className="draft-content-button" type="button">
-                        {sections.filter((section) => section.content.trim()).length}/{sections.length} drafted
-                      </button>
-                      {role === "Business Team" ? (
-                        <>
-                          <button className="toolbar-button" onClick={() => void saveSection(activeSection, { status: "Review" })}>
-                            Mark Ready for Enablement
-                          </button>
-                          <button
-                            className="toolbar-button"
-                            onClick={() => void savePlan({ approvalState: "Review", approvalPosture: "Ready for Executive Approval" })}
-                          >
-                            Mark Memo Ready for Approval
-                          </button>
-                          <button className="primary-button" onClick={() => void saveSection(activeSection, { content: activeSection.content })}>
-                            Save Draft
-                          </button>
-                        </>
-                      ) : null}
-                    </div>
+            {activeSection ? (
+              <section className="section-shell">
+                <div className="section-header">
+                  <div>
+                    <p className="eyebrow">Section {sectionIndex}</p>
+                    <h2 className="mt-2 text-3xl font-bold">{activeSection.title}</h2>
+                    <p className="mt-2 text-base text-[#69665c]">{sectionSubtitle(activeSection)}</p>
                   </div>
-                  {role === "Business Team" ? (
-                    <textarea
-                      className="memo-editor"
-                      value={activeSection.content}
-                      onChange={(event) => updateSectionContent(activeSection.id, event.target.value)}
-                      placeholder="Draft the section here."
-                    />
-                  ) : (
-                    <div className="memo-read">{activeSection.content || "No draft content yet."}</div>
-                  )}
                 </div>
 
-                <aside className="right-rail">
-                  <button className="guidance-toggle" onClick={() => setShowGuidance(!showGuidance)}>
-                    <span>
-                      <strong>Guidance</strong>
-                      <small>Expectations for this section</small>
-                    </span>
-                    <b>{showGuidance ? "Hide" : "Show"}</b>
-                  </button>
-                  {showGuidance ? <Guidance section={activeSection} /> : null}
-                  <button className="coach-button" onClick={() => setShowCoach(true)}>GPT Coach</button>
-                  <button className="questions-button" onClick={() => setQuestionsOpen(!questionsOpen)}>
-                    Questions ({visibleQuestions.length})
-                  </button>
-                  {questionsOpen ? (
-                    <QuestionPanel
-                      role={role}
-                      questions={visibleQuestions}
-                      visibility={visibility}
-                      issueType={issueType}
-                      enablementFunction={enablementFunction}
-                      questionDraft={questionDraft}
-                      responseDrafts={responseDrafts}
-                      setVisibility={setVisibility}
-                      setIssueType={setIssueType}
-                      setEnablementFunction={setEnablementFunction}
-                      setQuestionDraft={setQuestionDraft}
-                      setResponseDrafts={setResponseDrafts}
-                      isAddingQuestion={isAddingQuestion}
-                      addQuestion={addQuestion}
-                      saveQuestion={saveQuestion}
-                      removeQuestion={removeQuestion}
-                      canDelete={canDelete}
-                    />
-                  ) : null}
-                </aside>
-              </div>
-            </section>
+                <div className="section-editor-layout">
+                  <div className="editor-pane">
+                    <div className="mb-3 flex items-center justify-between gap-3">
+                      <div className="flex flex-wrap gap-2">
+                        <span className={`small-status small-status-active section-status-${activeSection.status.toLowerCase()}`}>
+                          {sectionStatusLabel(activeSection.status)}
+                        </span>
+                      </div>
+                      <div className="section-actions">
+                        <button className="draft-content-button" type="button">
+                          {sections.filter((section) => section.content.trim()).length}/{sections.length} drafted
+                        </button>
+                        {role === "Business Team" ? (
+                          <>
+                            <button className="toolbar-button" onClick={() => void saveSection(activeSection, { content: activeSection.content, status: "Draft" })}>
+                              Save Draft
+                            </button>
+                            <button className="toolbar-button" onClick={() => void saveSection(activeSection, { content: activeSection.content, status: "Review" })}>
+                              Save for Review
+                            </button>
+                            <button className="primary-button" onClick={() => void saveSection(activeSection, { content: activeSection.content, status: "Approved" })}>
+                              Save for Approval
+                            </button>
+                          </>
+                        ) : null}
+                      </div>
+                    </div>
+                    {role === "Business Team" ? (
+                      <textarea
+                        className="memo-editor"
+                        value={activeSection.content}
+                        onChange={(event) => updateSectionContent(activeSection.id, event.target.value)}
+                        placeholder="Draft the section here."
+                      />
+                    ) : (
+                      <div className="memo-read">{activeSection.content || "No draft content yet."}</div>
+                    )}
+                  </div>
+
+                  <aside className="right-rail">
+                    <HowToPanel />
+                    <button className="guidance-toggle" onClick={() => setShowGuidance(!showGuidance)}>
+                      <span>
+                        <strong>Guidance</strong>
+                        <small>Expectations for this section</small>
+                      </span>
+                      <b>{showGuidance ? "Hide" : "Show"}</b>
+                    </button>
+                    {showGuidance ? <Guidance section={activeSection} /> : null}
+                    <button className="coach-button" onClick={() => setShowCoach(true)}>GPT Coach</button>
+                    <button className="questions-button" onClick={() => setQuestionsOpen(!questionsOpen)}>
+                      Questions ({visibleQuestions.length})
+                    </button>
+                    {questionsOpen ? (
+                      <QuestionPanel
+                        role={role}
+                        questions={visibleQuestions}
+                        visibility={visibility}
+                        issueType={issueType}
+                        enablementFunction={enablementFunction}
+                        questionDraft={questionDraft}
+                        responseDrafts={responseDrafts}
+                        setVisibility={setVisibility}
+                        setIssueType={setIssueType}
+                        setEnablementFunction={setEnablementFunction}
+                        setQuestionDraft={setQuestionDraft}
+                        setResponseDrafts={setResponseDrafts}
+                        isAddingQuestion={isAddingQuestion}
+                        addQuestion={addQuestion}
+                        saveQuestion={saveQuestion}
+                        removeQuestion={removeQuestion}
+                        canDelete={canDelete}
+                      />
+                    ) : null}
+                  </aside>
+                </div>
+              </section>
+            ) : (
+              <section className="section-shell empty-workflow-state">
+                <p className="eyebrow">{role} view</p>
+                <h2>No sections are available yet.</h2>
+                <p>
+                  Draft sections are visible only to the Business Team. Sections appear here after the Business Team saves them for {role === "Enablement" ? "review" : "approval"}.
+                </p>
+              </section>
+            )}
           </div>
         ) : (
           <div className={`full-memo-layout full-memo-layout-${role.toLowerCase().replace(/\s+/g, "-")}`}>
             <FullMemo
-              sections={sections}
+              sections={visibleSections}
               title={planTitle}
               role={role}
               openDependencies={openDependencies}
@@ -560,7 +572,7 @@ export default function Home() {
         <MemoPrint sections={sections} title={planTitle} plan={plan} approvers={approvers} />
       </div>
 
-      {showCoach ? (
+      {showCoach && activeSection ? (
         <Modal title="GPT Coach" onClose={() => setShowCoach(false)}>
           <CoachActions section={activeSection} />
         </Modal>
@@ -608,12 +620,14 @@ function MemoOutline({
   questions,
   activeId,
   inReviewCount,
+  inApprovalCount,
   onSelect,
 }: {
   sections: MemoSection[];
   questions: Question[];
   activeId: string;
   inReviewCount: number;
+  inApprovalCount: number;
   onSelect: (id: string) => void;
 }) {
   return (
@@ -621,7 +635,7 @@ function MemoOutline({
       <p className="eyebrow">Memo outline</p>
       <div className="outline-progress">
         <span style={{ width: `${sections.length ? (inReviewCount / sections.length) * 100 : 0}%` }} />
-        <small>{inReviewCount}/{sections.length} in review</small>
+        <small>{inReviewCount}/{sections.length} released, {inApprovalCount} for approval</small>
       </div>
       <nav className="mt-5 space-y-1">
         {sections.map((section) => {
@@ -859,6 +873,23 @@ function QuestionList({
   );
 }
 
+function HowToPanel() {
+  return (
+    <section className="how-to-card" aria-label="How to complete the business plan">
+      <p className="eyebrow">How to complete the plan</p>
+      <ol>
+        <li>Select the correct business plan view before drafting.</li>
+        <li>Use the section guidance to answer with facts, owners, timing, metrics, risks, dependencies, and the decision needed.</li>
+        <li>Save Draft while the Business Team is still working. Drafts are not visible to Enablement or Approvers.</li>
+        <li>Save for Review when Enablement should read the section and ask questions.</li>
+        <li>Resolve questions in the Questions panel, then update the memo text directly.</li>
+        <li>Save for Approval when Tim, Dan, and designated approvers should review the section.</li>
+      </ol>
+      <p>One business owner should own the final answer for each section. Avoid vague alignment asks, unsupported claims, and group-written language that does not name the decision or support needed.</p>
+    </section>
+  );
+}
+
 function FullMemo({
   sections,
   title,
@@ -891,7 +922,7 @@ function FullMemo({
         ) : null}
         {role === "Approver" && askSection?.content ? <p className="memo-ask-line">{askSection.content}</p> : null}
       </div>
-      {sections.map((section, index) => {
+      {sections.length ? sections.map((section, index) => {
         return (
           <section key={section.id} className="full-memo-section">
             <div className="flex items-start justify-between gap-4">
@@ -903,7 +934,11 @@ function FullMemo({
             <div className="memo-box">{section.content || "Draft content pending."}</div>
           </section>
         );
-      })}
+      }) : (
+        <section className="full-memo-section">
+          <div className="memo-box">No memo sections are available for this role yet.</div>
+        </section>
+      )}
       <span className="sr-only">{title}</span>
     </article>
   );
