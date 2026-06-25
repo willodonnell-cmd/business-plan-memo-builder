@@ -289,7 +289,7 @@ export default function Home() {
       <header className="mx-auto max-w-[1500px] px-4 pt-6 print:hidden sm:px-6">
         <div className="desktop-header flex flex-wrap items-start justify-between gap-5 border-b border-[#d9d5ca] pb-6">
           <div className="flex min-w-0 items-start gap-3">
-            <div className="brand-mark" aria-hidden="true">▤</div>
+            <div className="brand-mark" role="img" aria-label="Prologis" />
             <div className="min-w-0">
               <div className="flex min-w-0 items-center gap-2">
                 <h1 className="site-title truncate font-bold tracking-0">{planTitle}</h1>
