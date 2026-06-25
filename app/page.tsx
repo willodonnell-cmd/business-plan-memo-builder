@@ -67,6 +67,7 @@ export default function Home() {
   const [responseDrafts, setResponseDrafts] = useState<Record<string, string>>({});
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const [message, setMessage] = useState("Loading workspace...");
+  const [showSavedToast, setShowSavedToast] = useState(false);
 
   const sections = plan?.sections ?? emptySections;
   const questions = plan?.questions ?? emptyQuestions;
@@ -134,6 +135,9 @@ export default function Home() {
     setResponseDrafts(Object.fromEntries(nextPlan.questions.map((question) => [question.id, question.response])));
     setSaveState("saved");
     setMessage(nextMessage);
+    if (nextMessage !== "Loaded") {
+      setShowSavedToast(true);
+    }
   }
 
   async function savePlan(patch: Partial<Pick<WorkspacePlan, "teamName" | "approvalState" | "approvalPosture">>) {
@@ -262,6 +266,12 @@ export default function Home() {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    if (!showSavedToast) return;
+    const timeout = window.setTimeout(() => setShowSavedToast(false), 1800);
+    return () => window.clearTimeout(timeout);
+  }, [showSavedToast]);
 
   if (!plan || !activeSection) {
     return (
@@ -567,6 +577,12 @@ export default function Home() {
         <Modal title="GPT Coach" onClose={() => setShowCoach(false)}>
           <CoachActions section={activeSection} />
         </Modal>
+      ) : null}
+
+      {showSavedToast ? (
+        <div className="saved-toast" role="status" aria-live="polite">
+          Saved
+        </div>
       ) : null}
     </main>
   );

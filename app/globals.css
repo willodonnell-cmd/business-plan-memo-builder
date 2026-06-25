@@ -312,6 +312,24 @@ textarea:focus {
   color: #8a3329;
 }
 
+.saved-toast {
+  position: fixed;
+  right: 22px;
+  bottom: 22px;
+  z-index: 80;
+  display: inline-flex;
+  min-height: 38px;
+  align-items: center;
+  border: 1px solid #b8dac2;
+  border-radius: 999px;
+  background: #f2fbf4;
+  box-shadow: 0 12px 32px rgb(44 42 38 / 14%);
+  color: #235737;
+  font-size: 0.9rem;
+  font-weight: 800;
+  padding: 0 18px;
+}
+
 .outline-card {
   align-self: start;
   padding: 14px;
