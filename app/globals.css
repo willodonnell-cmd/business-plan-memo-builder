@@ -1042,6 +1042,15 @@ textarea:focus {
   color: #2f2b25;
 }
 
+.coach-output-error {
+  border-color: #e3b8ad;
+  background: #fff5f2;
+}
+
+.coach-output-error pre {
+  color: #8a2c1f;
+}
+
 .memo-output {
   background: white;
   color: #111;

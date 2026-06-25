@@ -990,7 +990,10 @@ function Modal({ title, children, onClose }: { title: string; children: ReactNod
 
 function CoachActions({ section }: { section: MemoSection }) {
   const [context, setContext] = useState("");
-  const [coachDraft, setCoachDraft] = useState("");
+  const [coachResult, setCoachResult] = useState("");
+  const [coachError, setCoachError] = useState("");
+  const [activeAction, setActiveAction] = useState("");
+  const [isCoaching, setIsCoaching] = useState(false);
   const actions = [
     "Tighten this section",
     "Make this more executive-ready",
@@ -1002,25 +1005,36 @@ function CoachActions({ section }: { section: MemoSection }) {
     ...sectionCoachActions(section.title),
   ];
 
-  function runCoachAction(action: string) {
-    const sectionContent = section.content.trim() || "[No memo draft has been entered yet.]";
-    const optionalContext = context.trim() || "[No additional context supplied.]";
-    setCoachDraft(
-      [
-        `${action} for ${section.title}`,
-        "",
-        "Use the section guidance below and return concise, executive-ready coaching. Do not invent facts. If facts are missing, call out the gap and suggest what the business team should provide.",
-        "",
-        "Section guidance:",
-        section.prompt,
-        "",
-        "Current draft:",
-        sectionContent,
-        "",
-        "Additional context:",
-        optionalContext,
-      ].join("\n"),
-    );
+  async function runCoachAction(action: string) {
+    setIsCoaching(true);
+    setActiveAction(action);
+    setCoachError("");
+    setCoachResult("");
+    try {
+      const response = await fetch("/api/coach", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          action,
+          sectionTitle: section.title,
+          sectionPrompt: section.prompt,
+          sectionFormat: section.format,
+          sectionEmphasize: section.emphasize,
+          sectionAvoid: section.avoid,
+          sectionContent: section.content,
+          context,
+        }),
+      });
+      const payload = (await response.json()) as { result?: string; error?: string };
+      if (!response.ok || !payload.result) {
+        throw new Error(payload.error ?? "GPT Coach request failed.");
+      }
+      setCoachResult(payload.result);
+    } catch (error) {
+      setCoachError(error instanceof Error ? error.message : "GPT Coach request failed.");
+    } finally {
+      setIsCoaching(false);
+    }
   }
 
   return (
@@ -1030,7 +1044,9 @@ function CoachActions({ section }: { section: MemoSection }) {
       </p>
       <div className="coach-action-grid">
         {actions.map((action) => (
-          <button key={action} className="toolbar-button" onClick={() => runCoachAction(action)}>{action}</button>
+          <button key={action} className="toolbar-button" disabled={isCoaching} onClick={() => void runCoachAction(action)}>
+            {isCoaching && activeAction === action ? "Working..." : action}
+          </button>
         ))}
       </div>
       <textarea
@@ -1039,10 +1055,16 @@ function CoachActions({ section }: { section: MemoSection }) {
         value={context}
         onChange={(event) => setContext(event.target.value)}
       />
-      {coachDraft ? (
+      {coachError ? (
+        <div className="coach-output coach-output-error mt-4" role="alert">
+          <p className="eyebrow">GPT Coach error</p>
+          <pre>{coachError}</pre>
+        </div>
+      ) : null}
+      {coachResult ? (
         <div className="coach-output mt-4" role="status" aria-live="polite">
-          <p className="eyebrow">Coach prompt</p>
-          <pre>{coachDraft}</pre>
+          <p className="eyebrow">GPT Coach response</p>
+          <pre>{coachResult}</pre>
         </div>
       ) : null}
     </div>
