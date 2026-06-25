@@ -954,6 +954,8 @@ function Modal({ title, children, onClose }: { title: string; children: ReactNod
 }
 
 function CoachActions({ section }: { section: MemoSection }) {
+  const [context, setContext] = useState("");
+  const [coachDraft, setCoachDraft] = useState("");
   const actions = [
     "Tighten this section",
     "Make this more executive-ready",
@@ -965,6 +967,27 @@ function CoachActions({ section }: { section: MemoSection }) {
     ...sectionCoachActions(section.title),
   ];
 
+  function runCoachAction(action: string) {
+    const sectionContent = section.content.trim() || "[No memo draft has been entered yet.]";
+    const optionalContext = context.trim() || "[No additional context supplied.]";
+    setCoachDraft(
+      [
+        `${action} for ${section.title}`,
+        "",
+        "Use the section guidance below and return concise, executive-ready coaching. Do not invent facts. If facts are missing, call out the gap and suggest what the business team should provide.",
+        "",
+        "Section guidance:",
+        section.prompt,
+        "",
+        "Current draft:",
+        sectionContent,
+        "",
+        "Additional context:",
+        optionalContext,
+      ].join("\n"),
+    );
+  }
+
   return (
     <div>
       <p className="text-sm leading-6 text-[#45413a]">
@@ -972,13 +995,21 @@ function CoachActions({ section }: { section: MemoSection }) {
       </p>
       <div className="coach-action-grid">
         {actions.map((action) => (
-          <button key={action} className="toolbar-button">{action}</button>
+          <button key={action} className="toolbar-button" onClick={() => runCoachAction(action)}>{action}</button>
         ))}
       </div>
       <textarea
         className="coach-box mt-4"
         placeholder={`Optional context for ${section.title}. Do not add facts unless they are supplied here.`}
+        value={context}
+        onChange={(event) => setContext(event.target.value)}
       />
+      {coachDraft ? (
+        <div className="coach-output mt-4" role="status" aria-live="polite">
+          <p className="eyebrow">Coach prompt</p>
+          <pre>{coachDraft}</pre>
+        </div>
+      ) : null}
     </div>
   );
 }
