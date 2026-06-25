@@ -16,7 +16,7 @@ export async function PATCH(
     return Response.json({ plan: await getWorkspacePlan(input.planId) });
   } catch (error) {
     const message = toRouteErrorMessage(error);
-    const status = message.includes("not found") ? 404 : 500;
+    const status = message.includes("not found") ? 404 : message.includes("cannot set") ? 403 : 500;
     return Response.json({ error: message }, { status });
   }
 }

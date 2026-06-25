@@ -690,6 +690,7 @@ textarea:focus {
 }
 
 .question-card {
+  position: relative;
   overflow: hidden;
   border: 1px solid #ded7ca;
   border-radius: 8px;
@@ -703,7 +704,7 @@ textarea:focus {
   align-items: center;
   gap: 6px;
   border-bottom: 1px solid #eee9df;
-  padding: 9px 10px;
+  padding: 9px 42px 9px 10px;
 }
 
 .question-card-head select {
@@ -765,12 +766,26 @@ textarea:focus {
 }
 
 .delete-question {
-  margin: 0 14px 14px;
+  position: absolute;
+  right: 8px;
+  top: 8px;
+  z-index: 1;
+  display: grid;
+  width: 26px;
+  height: 26px;
+  place-items: center;
   border: 0;
+  border-radius: 999px;
   background: transparent;
-  color: #8a3329;
-  font-size: 0.85rem;
+  color: #756f64;
+  font-size: 1.1rem;
   font-weight: 700;
+  line-height: 1;
+}
+
+.delete-question:hover {
+  background: #f6e7e3;
+  color: #8a3329;
 }
 
 .empty-note {

@@ -233,6 +233,18 @@ export async function createQuestion(input: {
   }
 
   const role = normalize(input.role, allowedRoles, "Enablement");
+  const author = input.author?.trim() || authorForRole(role);
+  const existingQuestion = await d1
+    .prepare(
+      "SELECT id FROM section_questions WHERE plan_id = ? AND section_id = ? AND author_name = ? AND author_role = ? AND body = ? LIMIT 1",
+    )
+    .bind(planId, sectionId, author, role, body)
+    .first<{ id: string }>();
+
+  if (existingQuestion) {
+    return;
+  }
+
   const now = Date.now();
   await d1
     .prepare(
@@ -242,7 +254,7 @@ export async function createQuestion(input: {
       crypto.randomUUID(),
       planId,
       sectionId,
-      input.author?.trim() || authorForRole(role),
+      author,
       role,
       normalize(input.visibility, allowedVisibility, "Public"),
       "Open",
@@ -258,7 +270,7 @@ export async function createQuestion(input: {
 
 export async function updateQuestion(
   id: string,
-  input: { planId?: string; status?: QuestionStatus; response?: string },
+  input: { planId?: string; role?: Role; status?: QuestionStatus; response?: string },
 ) {
   const planId = resolvePlanId(input.planId);
   const d1 = getD1();
@@ -274,10 +286,16 @@ export async function updateQuestion(
     throw new Error("Question not found.");
   }
 
+  const actingRole = normalize(input.role, allowedRoles, "Business Team");
+  const nextStatus = normalize(input.status, allowedQuestionStatuses, current.status);
+  if (input.status && !allowedQuestionStatusForRole(actingRole, nextStatus)) {
+    throw new Error("This role cannot set that question status.");
+  }
+
   await d1
     .prepare("UPDATE section_questions SET status = ?, response = ?, updated_at = ? WHERE id = ? AND plan_id = ?")
     .bind(
-      normalize(input.status, allowedQuestionStatuses, current.status),
+      nextStatus,
       input.response ?? current.response,
       Date.now(),
       id,
@@ -563,6 +581,13 @@ function toApprover(row: ApproverRow): Approver {
 
 function normalize<T extends readonly string[]>(value: unknown, allowed: T, fallback: T[number]): T[number] {
   return typeof value === "string" && allowed.includes(value) ? value : fallback;
+}
+
+function allowedQuestionStatusForRole(role: Role, status: QuestionStatus) {
+  if (role === "Business Team") {
+    return status === "Open" || status === "Answered" || status === "Resolved" || status === "No Change Needed";
+  }
+  return status === "Open" || status === "Reopened" || status === "Resolved";
 }
 
 async function addColumnIfMissing(d1: D1Database, table: string, column: string, definition: string) {

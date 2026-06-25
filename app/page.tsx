@@ -25,7 +25,6 @@ type SaveState = "idle" | "saving" | "saved" | "error";
 
 const roles: Role[] = ["Business Team", "Enablement", "Approver"];
 const sectionReadinessStatuses: SectionStatus[] = ["Draft", "Review"];
-const questionStatuses: QuestionStatus[] = ["Open", "Answered", "Resolved", "Reopened", "No Change Needed"];
 const enablementFunctions: EnablementFunction[] = ["HR", "Legal", "IT", "Finance & Accounting", "Tax", "Marketing", "CLS", "Other"];
 const approverPostures = ["Questions", "Approved"];
 const emptySections: MemoSection[] = [];
@@ -33,6 +32,22 @@ const emptyQuestions: Question[] = [];
 const emptyApprovers: Approver[] = [];
 const currentUserEmail = "wodonnell@prologis.com";
 const defaultPlanId = businessPlanWorkstreams[0].id;
+
+function isOpenQuestionStatus(status: QuestionStatus) {
+  return status === "Open" || status === "Reopened";
+}
+
+function allowedQuestionStatusesForRole(role: Role) {
+  if (role === "Business Team") {
+    return ["Open", "Answered", "Resolved", "No Change Needed"] as QuestionStatus[];
+  }
+  return ["Open", "Reopened", "Resolved"] as QuestionStatus[];
+}
+
+function questionStatusOptions(role: Role, currentStatus: QuestionStatus) {
+  const options = allowedQuestionStatusesForRole(role);
+  return options.includes(currentStatus) ? options : [currentStatus, ...options];
+}
 
 export default function Home() {
   const [plan, setPlan] = useState<WorkspacePlan | null>(null);
@@ -45,6 +60,7 @@ export default function Home() {
   const [showHowTo, setShowHowTo] = useState(false);
   const [questionsOpen, setQuestionsOpen] = useState(false);
   const [questionDraft, setQuestionDraft] = useState("");
+  const [isAddingQuestion, setIsAddingQuestion] = useState(false);
   const [visibility, setVisibility] = useState<Visibility>("Public");
   const [issueType, setIssueType] = useState<IssueType>("Clarification");
   const [enablementFunction, setEnablementFunction] = useState<EnablementFunction>("Legal");
@@ -57,13 +73,13 @@ export default function Home() {
   const approvers = plan?.approvers ?? emptyApprovers;
   const activeSection = sections.find((section) => section.id === activeId) ?? sections[0] ?? null;
   const planTitle = plan?.title ?? "2027 Essentials Business Plan";
-  const openQuestions = questions.filter((question) => question.status !== "Resolved").length;
+  const openQuestions = questions.filter((question) => isOpenQuestionStatus(question.status)).length;
   const approvedCount = approvers.filter((approver) => approver.posture === "Approved").length;
   const sectionIndex = activeSection ? sections.findIndex((section) => section.id === activeSection.id) + 1 : 1;
   const inReviewCount = sections.filter((section) => section.status !== "Draft").length;
   const openDependencies = questions.filter(
     (question) =>
-      question.status !== "Resolved" &&
+      isOpenQuestionStatus(question.status) &&
       ["Functional Dependency", "Support Need", "Required Input"].includes(question.issueType),
   ).length;
   const currentApprover = approvers[0] ?? null;
@@ -137,29 +153,35 @@ export default function Home() {
   }
 
   async function addQuestion() {
-    if (!activeSection || !questionDraft.trim()) return;
-    const nextPlan = await requestPlan("/api/questions", {
-      method: "POST",
-      body: JSON.stringify({
-        planId: activePlanId,
-        sectionId: activeSection.id,
-        author: role === "Business Team" ? "Business Team" : role,
-        role,
-        visibility,
-        issueType: role === "Approver" ? "Approval Concern" : role === "Enablement" ? "Support Need" : issueType,
-        functionName: role === "Enablement" ? enablementFunction : "",
-        body: questionDraft.trim(),
-      }),
-    });
-    setQuestionDraft("");
-    setQuestionsOpen(true);
-    applyPlan(nextPlan, "Question added");
+    const body = questionDraft.trim();
+    if (!activeSection || !body || isAddingQuestion) return;
+    setIsAddingQuestion(true);
+    try {
+      const nextPlan = await requestPlan("/api/questions", {
+        method: "POST",
+        body: JSON.stringify({
+          planId: activePlanId,
+          sectionId: activeSection.id,
+          author: role === "Business Team" ? "Business Team" : role,
+          role,
+          visibility,
+          issueType: role === "Approver" ? "Approval Concern" : role === "Enablement" ? "Support Need" : issueType,
+          functionName: role === "Enablement" ? enablementFunction : "",
+          body,
+        }),
+      });
+      setQuestionDraft("");
+      setQuestionsOpen(true);
+      applyPlan(nextPlan, "Question added");
+    } finally {
+      setIsAddingQuestion(false);
+    }
   }
 
   async function saveQuestion(question: Question, patch: Partial<Pick<Question, "status" | "response">>) {
     const nextPlan = await requestPlan(`/api/questions/${encodeURIComponent(question.id)}`, {
       method: "PATCH",
-      body: JSON.stringify({ ...patch, planId: activePlanId }),
+      body: JSON.stringify({ ...patch, role, planId: activePlanId }),
     });
     applyPlan(nextPlan, "Question saved");
   }
@@ -416,6 +438,7 @@ export default function Home() {
                       setEnablementFunction={setEnablementFunction}
                       setQuestionDraft={setQuestionDraft}
                       setResponseDrafts={setResponseDrafts}
+                      isAddingQuestion={isAddingQuestion}
                       addQuestion={addQuestion}
                       saveQuestion={saveQuestion}
                       removeQuestion={removeQuestion}
@@ -457,6 +480,7 @@ export default function Home() {
                       setEnablementFunction={setEnablementFunction}
                       setQuestionDraft={setQuestionDraft}
                       setResponseDrafts={setResponseDrafts}
+                      isAddingQuestion={isAddingQuestion}
                       addQuestion={addQuestion}
                       saveQuestion={saveQuestion}
                       removeQuestion={removeQuestion}
@@ -481,6 +505,7 @@ export default function Home() {
                       setEnablementFunction={setEnablementFunction}
                       setQuestionDraft={setQuestionDraft}
                       setResponseDrafts={setResponseDrafts}
+                      isAddingQuestion={isAddingQuestion}
                       addQuestion={addQuestion}
                       saveQuestion={saveQuestion}
                       removeQuestion={removeQuestion}
@@ -508,6 +533,7 @@ export default function Home() {
                     setEnablementFunction={setEnablementFunction}
                     setQuestionDraft={setQuestionDraft}
                     setResponseDrafts={setResponseDrafts}
+                    isAddingQuestion={isAddingQuestion}
                     addQuestion={addQuestion}
                     saveQuestion={saveQuestion}
                     removeQuestion={removeQuestion}
@@ -596,7 +622,7 @@ function MemoOutline({
       </div>
       <nav className="mt-5 space-y-1">
         {sections.map((section) => {
-          const count = questions.filter((question) => question.sectionId === section.id && question.status !== "Resolved").length;
+          const count = questions.filter((question) => question.sectionId === section.id && isOpenQuestionStatus(question.status)).length;
           return (
             <button
               key={section.id}
@@ -650,7 +676,7 @@ function QuestionDrawer(props: QuestionPanelProps & { onClose: () => void }) {
       <div className="question-drawer-head">
         <div>
           <p className="eyebrow">Review thread</p>
-          <h2>Questions ({props.questions.filter((question) => question.status !== "Resolved").length} open)</h2>
+          <h2>Questions ({props.questions.filter((question) => isOpenQuestionStatus(question.status)).length} open)</h2>
         </div>
         <button className="toolbar-button" onClick={props.onClose}>Close</button>
       </div>
@@ -699,6 +725,7 @@ type QuestionPanelProps = {
   setEnablementFunction: (value: EnablementFunction) => void;
   setQuestionDraft: (draft: string) => void;
   setResponseDrafts: Dispatch<SetStateAction<Record<string, string>>>;
+  isAddingQuestion: boolean;
   addQuestion: () => Promise<void>;
   saveQuestion: (question: Question, patch: Partial<Pick<Question, "status" | "response">>) => Promise<void>;
   removeQuestion: (question: Question) => Promise<void>;
@@ -710,6 +737,7 @@ function QuestionComposer({
   visibility,
   enablementFunction,
   questionDraft,
+  isAddingQuestion,
   setVisibility,
   setEnablementFunction,
   setQuestionDraft,
@@ -739,7 +767,14 @@ function QuestionComposer({
           <option value="Private">Team only — enablement + business</option>
           <option value="Draft">Draft — only you</option>
         </select>
-        <button className="send-button" title={`Ask as ${role}`} onClick={() => void addQuestion()}>Submit</button>
+        <button
+          className="send-button"
+          title={`Ask as ${role}`}
+          disabled={isAddingQuestion || !questionDraft.trim()}
+          onClick={() => void addQuestion()}
+        >
+          {isAddingQuestion ? "Submitting" : "Submit"}
+        </button>
       </div>
     </div>
   );
@@ -759,16 +794,27 @@ function QuestionList({
       {questions.length === 0 ? <p className="empty-note">No questions for this view.</p> : null}
       {questions.map((question) => (
         <article key={question.id} className="question-card">
+          {canDelete(question) ? (
+            <button
+              className="delete-question"
+              aria-label="Delete question"
+              title="Delete question"
+              onClick={() => void removeQuestion(question)}
+            >
+              ×
+            </button>
+          ) : null}
           <div className="question-card-head">
             <span className="status-tag status-open">{question.status}</span>
             <span className="status-tag status-type">{question.issueType}</span>
             <span className="status-tag status-public">{question.visibility === "Private" ? "Team only" : question.visibility}</span>
             <span className="question-author">· {question.functionName ? `${question.functionName} · ` : ""}{question.role}</span>
             <select
+              aria-label="Question status"
               value={question.status}
               onChange={(event) => void saveQuestion(question, { status: event.target.value as QuestionStatus })}
             >
-              {questionStatuses.map((status) => (
+              {questionStatusOptions(role, question.status).map((status) => (
                 <option key={status}>{status}</option>
               ))}
             </select>
@@ -784,7 +830,15 @@ function QuestionList({
                 }
                 placeholder="Respond to the question..."
               />
-              <button className="toolbar-button" onClick={() => void saveQuestion(question, { response: responseDrafts[question.id] ?? "" })}>
+              <button
+                className="toolbar-button"
+                onClick={() =>
+                  void saveQuestion(question, {
+                    response: responseDrafts[question.id] ?? "",
+                    status: "Answered",
+                  })
+                }
+              >
                 Save response
               </button>
             </div>
@@ -796,9 +850,6 @@ function QuestionList({
           ) : (
             <p className="response-empty">No response yet.</p>
           )}
-          {canDelete(question) ? (
-            <button className="delete-question" onClick={() => void removeQuestion(question)}>Delete</button>
-          ) : null}
         </article>
       ))}
     </div>
