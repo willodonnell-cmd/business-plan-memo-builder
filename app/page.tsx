@@ -57,7 +57,6 @@ export default function Home() {
   const [activeId, setActiveId] = useState("");
   const [showGuidance, setShowGuidance] = useState(true);
   const [showCoach, setShowCoach] = useState(false);
-  const [showHowTo, setShowHowTo] = useState(false);
   const [questionsOpen, setQuestionsOpen] = useState(false);
   const [questionDraft, setQuestionDraft] = useState("");
   const [isAddingQuestion, setIsAddingQuestion] = useState(false);
@@ -323,7 +322,6 @@ export default function Home() {
                 </button>
               ))}
             </div>
-            <button className="toolbar-button" onClick={() => setShowHowTo(true)}>ⓘ How to</button>
             <button className="toolbar-button" onClick={() => window.print()}>⇩ Export PDF</button>
           </div>
         </div>
@@ -561,17 +559,6 @@ export default function Home() {
       <div className="hidden print:block">
         <MemoPrint sections={sections} title={planTitle} plan={plan} approvers={approvers} />
       </div>
-
-      {showHowTo ? (
-        <Modal title="How to" onClose={() => setShowHowTo(false)}>
-          <ol className="space-y-3 text-sm leading-6 text-[#45413a]">
-            <li>1. Business Team drafts each memo section and saves explicit changes.</li>
-            <li>2. Enablement reads the full plan and flags clarification questions, functional dependencies, support needs, constraints, or required inputs.</li>
-            <li>3. Business Team resolves issues and marks the full memo ready for executive approval.</li>
-            <li>4. Approvers review the formatted memo, set individual posture, and export the memo-only PDF.</li>
-          </ol>
-        </Modal>
-      ) : null}
 
       {showCoach ? (
         <Modal title="GPT Coach" onClose={() => setShowCoach(false)}>
