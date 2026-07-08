@@ -405,6 +405,10 @@ textarea:focus {
 }
 
 .section-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
   border-bottom: 1px solid #eee9df;
   padding: 18px 20px;
 }
@@ -412,6 +416,23 @@ textarea:focus {
 .section-header h2 {
   font-size: 1.35rem;
   line-height: 1.25;
+}
+
+.help-button {
+  min-height: 34px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: #fffdf8;
+  color: var(--green-dark);
+  font-size: 0.86rem;
+  font-weight: 800;
+  padding: 0 14px;
+  white-space: nowrap;
+}
+
+.help-button:hover {
+  border-color: var(--green);
+  background: var(--green-soft);
 }
 
 .editor-pane {
@@ -555,22 +576,18 @@ textarea:focus {
 }
 
 .how-to-card {
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  background: #fbfaf6;
-  padding: 12px;
   color: #3f403a;
-  font-size: 0.88rem;
-  line-height: 1.55;
+  font-size: 0.96rem;
+  line-height: 1.6;
 }
 
 .how-to-card ol {
-  margin: 8px 0 10px;
-  padding-left: 18px;
+  margin: 0 0 14px;
+  padding-left: 22px;
 }
 
 .how-to-card li + li {
-  margin-top: 6px;
+  margin-top: 8px;
 }
 
 .how-to-card p:last-child {

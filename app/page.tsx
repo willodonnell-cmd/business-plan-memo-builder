@@ -68,6 +68,7 @@ export default function Home() {
   const [activeId, setActiveId] = useState("");
   const [showGuidance, setShowGuidance] = useState(true);
   const [showCoach, setShowCoach] = useState(false);
+  const [showHelp, setShowHelp] = useState(false);
   const [questionsOpen, setQuestionsOpen] = useState(false);
   const [questionDraft, setQuestionDraft] = useState("");
   const [isAddingQuestion, setIsAddingQuestion] = useState(false);
@@ -380,6 +381,9 @@ export default function Home() {
                     <h2 className="mt-2 text-3xl font-bold">{activeSection.title}</h2>
                     <p className="mt-2 text-base text-[#69665c]">{sectionSubtitle(activeSection)}</p>
                   </div>
+                  <button className="help-button" type="button" onClick={() => setShowHelp(true)}>
+                    Help
+                  </button>
                 </div>
 
                 <div className="section-editor-layout">
@@ -422,7 +426,6 @@ export default function Home() {
                   </div>
 
                   <aside className="right-rail">
-                    <HowToPanel />
                     <button className="guidance-toggle" onClick={() => setShowGuidance(!showGuidance)}>
                       <span>
                         <strong>Guidance</strong>
@@ -575,6 +578,12 @@ export default function Home() {
       {showCoach && activeSection ? (
         <Modal title="GPT Coach" onClose={() => setShowCoach(false)}>
           <CoachActions section={activeSection} />
+        </Modal>
+      ) : null}
+
+      {showHelp ? (
+        <Modal title="How to complete the plan" onClose={() => setShowHelp(false)}>
+          <HowToPanel />
         </Modal>
       ) : null}
 
