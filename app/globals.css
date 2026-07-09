@@ -384,20 +384,20 @@ textarea:focus {
 
 .saved-toast {
   position: fixed;
-  right: 22px;
-  bottom: 22px;
+  right: 28px;
+  bottom: 28px;
   z-index: 80;
   display: inline-flex;
-  min-height: 38px;
+  min-height: 57px;
   align-items: center;
   border: 1px solid #b8dac2;
   border-radius: 999px;
   background: #f2fbf4;
   box-shadow: 0 12px 32px rgb(44 42 38 / 14%);
   color: #235737;
-  font-size: 0.9rem;
+  font-size: 1.35rem;
   font-weight: 800;
-  padding: 0 18px;
+  padding: 0 27px;
 }
 
 .outline-card {
@@ -1264,10 +1264,30 @@ textarea:focus {
   padding: 10px 12px;
 }
 
+.response-read p:last-child {
+  margin-top: 6px;
+  white-space: pre-wrap;
+}
+
 .response-editor textarea {
   min-height: 68px;
   margin: 8px 0;
   padding: 10px;
+}
+
+.reply-button {
+  margin: 8px 12px 10px;
+  border: 0;
+  background: transparent;
+  color: var(--green-dark);
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.reply-button:hover {
+  color: var(--green);
 }
 
 .response-empty {

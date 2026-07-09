@@ -38,7 +38,6 @@ type ApiInvestmentResponse = {
   error?: string;
 };
 
-type SaveState = "idle" | "saving" | "saved" | "error";
 type WorkspaceModule = "Memo" | "Investment Requests";
 
 const roles: Role[] = ["Business Team", "Enablement", "Approver", "General Reader"];
@@ -50,7 +49,7 @@ const emptyApprovers: Approver[] = [];
 const defaultPlanId = businessPlanWorkstreams[0].id;
 
 function workspaceModuleLabel(module: WorkspaceModule) {
-  return module === "Investment Requests" ? "G&A Engine" : module;
+  return module === "Investment Requests" ? "Headcount" : module;
 }
 
 function isOpenQuestionStatus(status: QuestionStatus) {
@@ -103,7 +102,6 @@ export default function Home() {
   const [issueType, setIssueType] = useState<IssueType>("Clarification");
   const [enablementFunction, setEnablementFunction] = useState<EnablementFunction>("Legal");
   const [responseDrafts, setResponseDrafts] = useState<Record<string, string>>({});
-  const [saveState, setSaveState] = useState<SaveState>("idle");
   const [message, setMessage] = useState("Loading workspace...");
   const [showSavedToast, setShowSavedToast] = useState(false);
 
@@ -168,7 +166,6 @@ export default function Home() {
   }, [questions, role, visibleSections]);
 
   async function requestPlan(path: string, init?: RequestInit) {
-    setSaveState("saving");
     setMessage(init?.method === "DELETE" ? "Deleting..." : "Saving...");
     const response = await fetch(path, {
       ...init,
@@ -179,7 +176,6 @@ export default function Home() {
     });
     const payload = (await response.json()) as ApiPlanResponse;
     if (!response.ok || !payload.plan) {
-      setSaveState("error");
       setMessage(payload.error ?? "Request failed.");
       throw new Error(payload.error ?? "Request failed.");
     }
@@ -187,8 +183,7 @@ export default function Home() {
   }
 
   const requestInvestments = useCallback(async (path: string, init?: RequestInit) => {
-    setSaveState("saving");
-    setMessage(init ? "Saving G&A Engine request..." : "Loading G&A Engine requests...");
+    setMessage(init ? "Saving Headcount request..." : "Loading Headcount requests...");
     const response = await fetch(path, {
       ...init,
       headers: {
@@ -198,7 +193,6 @@ export default function Home() {
     });
     const payload = (await response.json()) as ApiInvestmentResponse;
     if (!response.ok) {
-      setSaveState("error");
       setInvestmentError(payload.error ?? "Investment request failed.");
       setMessage(payload.error ?? "Investment request failed.");
       throw new Error(payload.error ?? "Investment request failed.");
@@ -216,7 +210,6 @@ export default function Home() {
       setInvestmentExport(payload.export);
     }
     setInvestmentError("");
-    setSaveState("saved");
     setMessage("Saved");
     return payload;
   }, []);
@@ -228,7 +221,6 @@ export default function Home() {
       nextPlan.sections.some((section) => section.id === current) ? current : nextPlan.sections[0]?.id || "",
     );
     setResponseDrafts(Object.fromEntries(nextPlan.questions.map((question) => [question.id, question.response])));
-    setSaveState("saved");
     setMessage(nextMessage);
     if (nextMessage !== "Loaded") {
       setShowSavedToast(true);
@@ -332,7 +324,6 @@ export default function Home() {
   }
 
   async function downloadInvestmentWorkbook(request: InvestmentRequest) {
-    setSaveState("saving");
     setMessage("Generating workbook...");
     setInvestmentError("");
     try {
@@ -353,11 +344,9 @@ export default function Home() {
       link.click();
       link.remove();
       window.URL.revokeObjectURL(url);
-      setSaveState("saved");
       setMessage("Workbook generated");
     } catch (error) {
       const message = error instanceof Error ? error.message : "Workbook export failed.";
-      setSaveState("error");
       setMessage(message);
       setInvestmentError(message);
     }
@@ -422,7 +411,6 @@ export default function Home() {
     let cancelled = false;
 
     async function loadInitialPlan() {
-      setSaveState("saving");
       setMessage("Loading...");
       try {
         const nextPlan = await requestPlan(`/api/plan?planId=${encodeURIComponent(defaultPlanId)}`);
@@ -581,7 +569,6 @@ export default function Home() {
                   </div>
                 </>
               )}
-              {saveState !== "idle" ? <span className={`save-state save-state-${saveState}`}>{message}</span> : null}
             </div>
           </div>
         </div>
@@ -992,7 +979,7 @@ function InvestmentRequestsWorkspace({
   if (!profile) {
     return (
       <section className="investment-empty">
-        <p className="eyebrow">G&A Engine</p>
+        <p className="eyebrow">Headcount</p>
         <h2>No G&A workbook template is configured for this business plan.</h2>
         <p>Phase 1 only supports the uploaded Data Centers, Energy Solutions, Essentials, and Strategic Capital workbooks.</p>
       </section>
@@ -1049,7 +1036,7 @@ function InvestmentRequestsWorkspace({
     <div className="investment-layout">
       <aside className="investment-sidebar">
         <div>
-          <p className="eyebrow">G&A Engine</p>
+          <p className="eyebrow">Headcount</p>
           <h2>{profile.businessUnit}</h2>
           <p>{submitted}/{requests.length || 0} submitted</p>
         </div>
@@ -1057,7 +1044,7 @@ function InvestmentRequestsWorkspace({
           value={search}
           onChange={(event) => onSearch(event.target.value)}
           placeholder="Search owner, title, milestone, amount, or keyword"
-          aria-label="Search G&A Engine requests"
+          aria-label="Search Headcount requests"
         />
         <div className="investment-create-row">
           <button className="primary-button" disabled={!canEdit} onClick={() => void onCreate("Payroll / Headcount")}>
@@ -1068,7 +1055,7 @@ function InvestmentRequestsWorkspace({
           </button>
         </div>
         <div className="investment-request-list">
-          {requests.length === 0 ? <p className="empty-note">No G&A Engine requests yet.</p> : null}
+          {requests.length === 0 ? <p className="empty-note">No Headcount requests yet.</p> : null}
           {requests.map((request) => (
             <div
               key={request.id}
@@ -1618,70 +1605,102 @@ function QuestionList({
   removeQuestion,
   canDelete,
 }: QuestionPanelProps) {
+  const [openResponseEditors, setOpenResponseEditors] = useState<Record<string, boolean>>({});
+
+  async function saveBusinessResponse(question: Question) {
+    const draft = (responseDrafts[question.id] ?? "").trim();
+    if (!draft) return;
+    const nextResponse = question.response.trim() ? `${question.response.trim()}\n\n${draft}` : draft;
+    await saveQuestion(question, {
+      response: nextResponse,
+      status: "Answered",
+    });
+    setResponseDrafts((current) => ({ ...current, [question.id]: "" }));
+    setOpenResponseEditors((current) => ({ ...current, [question.id]: false }));
+  }
+
+  function openBusinessResponse(question: Question) {
+    setResponseDrafts((current) => ({ ...current, [question.id]: "" }));
+    setOpenResponseEditors((current) => ({ ...current, [question.id]: true }));
+  }
+
   return (
     <div className="question-list">
       {questions.length === 0 ? <p className="empty-note">No questions for this view.</p> : null}
-      {questions.map((question) => (
-        <article key={question.id} className="question-card">
-          {canDelete(question) ? (
-            <button
-              className="delete-question"
-              aria-label="Delete question"
-              title="Delete question"
-              onClick={() => void removeQuestion(question)}
-            >
-              ×
-            </button>
-          ) : null}
-          <div className="question-card-head">
-            <span className="status-tag status-open">{question.status}</span>
-            <span className="status-tag status-type">{question.issueType}</span>
-            <span className="status-tag status-public">{question.visibility === "Private" ? "Team only" : question.visibility}</span>
-            <span className="question-author">· {question.functionName ? `${question.functionName} · ` : ""}{question.role}</span>
-            <select
-              aria-label="Question status"
-              value={question.status}
-              disabled={!canParticipate}
-              onChange={(event) => void saveQuestion(question, { status: event.target.value as QuestionStatus })}
-            >
-              {questionStatusOptions(role, question.status).map((status) => (
-                <option key={status}>{status}</option>
-              ))}
-            </select>
-          </div>
-          <p className="question-body">{question.body}</p>
-          {canEditMemo ? (
-            <div className="response-editor">
-              <p className="eyebrow">Business response</p>
-              <textarea
-                value={responseDrafts[question.id] ?? ""}
-                onChange={(event) =>
-                  setResponseDrafts((current) => ({ ...current, [question.id]: event.target.value }))
-                }
-                placeholder="Respond to the question..."
-              />
+      {questions.map((question) => {
+        const editorIsOpen = openResponseEditors[question.id] ?? !question.response;
+        return (
+          <article key={question.id} className="question-card">
+            {canDelete(question) ? (
               <button
-                className="toolbar-button"
-                onClick={() =>
-                  void saveQuestion(question, {
-                    response: responseDrafts[question.id] ?? "",
-                    status: "Answered",
-                  })
-                }
+                className="delete-question"
+                aria-label="Delete question"
+                title="Delete question"
+                onClick={() => void removeQuestion(question)}
               >
-                Save response
+                ×
               </button>
+            ) : null}
+            <div className="question-card-head">
+              <span className="status-tag status-open">{question.status}</span>
+              <span className="status-tag status-type">{question.issueType}</span>
+              <span className="status-tag status-public">{question.visibility === "Private" ? "Team only" : question.visibility}</span>
+              <span className="question-author">· {question.functionName ? `${question.functionName} · ` : ""}{question.role}</span>
+              <select
+                aria-label="Question status"
+                value={question.status}
+                disabled={!canParticipate}
+                onChange={(event) => void saveQuestion(question, { status: event.target.value as QuestionStatus })}
+              >
+                {questionStatusOptions(role, question.status).map((status) => (
+                  <option key={status}>{status}</option>
+                ))}
+              </select>
             </div>
-          ) : question.response ? (
-            <div className="response-read">
-              <p className="eyebrow">Business response</p>
-              <p>{question.response}</p>
-            </div>
-          ) : (
-            <p className="response-empty">No response yet.</p>
-          )}
-        </article>
-      ))}
+            <p className="question-body">{question.body}</p>
+            {canEditMemo ? (
+              <>
+                {question.response ? (
+                  <div className="response-read">
+                    <p className="eyebrow">Business response</p>
+                    <p>{question.response}</p>
+                  </div>
+                ) : null}
+                {editorIsOpen ? (
+                  <div className="response-editor">
+                    <p className="eyebrow">{question.response ? "Reply" : "Business response"}</p>
+                    <textarea
+                      value={responseDrafts[question.id] ?? ""}
+                      onChange={(event) =>
+                        setResponseDrafts((current) => ({ ...current, [question.id]: event.target.value }))
+                      }
+                      placeholder={question.response ? "Add a reply..." : "Respond to the question..."}
+                    />
+                    <button
+                      className="toolbar-button"
+                      disabled={!(responseDrafts[question.id] ?? "").trim()}
+                      onClick={() => void saveBusinessResponse(question)}
+                    >
+                      Save response
+                    </button>
+                  </div>
+                ) : (
+                  <button className="reply-button" type="button" onClick={() => openBusinessResponse(question)}>
+                    Reply
+                  </button>
+                )}
+              </>
+            ) : question.response ? (
+              <div className="response-read">
+                <p className="eyebrow">Business response</p>
+                <p>{question.response}</p>
+              </div>
+            ) : (
+              <p className="response-empty">No response yet.</p>
+            )}
+          </article>
+        );
+      })}
     </div>
   );
 }
@@ -1886,6 +1905,9 @@ function CoachActions({ section }: { section: MemoSection }) {
 
 function sectionSubtitle(section: MemoSection) {
   if (section.title === "Executive Summary") return "One short paragraph and 3-5 takeaways.";
+  if (section.title === "Headcount Needs") {
+    return "Please hold off entering information until phase two. Use the Headcount button above to initiate the initial request.";
+  }
   return section.prompt;
 }
 
