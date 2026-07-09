@@ -1,6 +1,6 @@
 export type Role = "Business Team" | "Enablement" | "Approver" | "General Reader";
 export type Mode = "Section" | "Full Memo";
-export type SectionStatus = "Draft" | "Review" | "Approved";
+export type SectionStatus = "Draft" | "Review" | "Approval" | "Approved";
 export type QuestionStatus = "Open" | "Answered" | "Resolved" | "Reopened" | "No Change Needed";
 export type IssueType =
   | "Clarification"

@@ -4,7 +4,7 @@ export const businessPlans = sqliteTable("business_plans", {
   id: text("id").primaryKey(),
   title: text("title").notNull(),
   teamName: text("team_name").notNull(),
-  approvalState: text("approval_state", { enum: ["Draft", "Review", "Approved"] })
+  approvalState: text("approval_state", { enum: ["Draft", "Review", "Approval", "Approved"] })
     .notNull()
     .default("Draft"),
   approvalPosture: text("approval_posture").notNull().default("Drafting"),
@@ -21,7 +21,7 @@ export const memoSections = sqliteTable("memo_sections", {
   title: text("title").notNull(),
   position: integer("position").notNull(),
   content: text("content").notNull().default(""),
-  status: text("status", { enum: ["Draft", "Review", "Approved"] }).notNull().default("Draft"),
+  status: text("status", { enum: ["Draft", "Review", "Approval", "Approved"] }).notNull().default("Draft"),
   updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
 });
 

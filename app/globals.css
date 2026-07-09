@@ -578,11 +578,20 @@ textarea:focus {
   border: 1px solid transparent;
   border-radius: 999px;
   background: transparent;
-  padding: 0 10px;
+  padding: 0 28px 0 10px;
   color: #8f4c16;
   font-size: 0.78rem;
   font-weight: 700;
   white-space: nowrap;
+}
+
+select.small-status {
+  appearance: none;
+  background-image: linear-gradient(45deg, transparent 50%, currentcolor 50%), linear-gradient(135deg, currentcolor 50%, transparent 50%);
+  background-position: calc(100% - 14px) 52%, calc(100% - 9px) 52%;
+  background-size: 5px 5px, 5px 5px;
+  background-repeat: no-repeat;
+  box-shadow: 0 2px 6px rgb(36 36 31 / 8%);
 }
 
 .small-status-active {
@@ -599,9 +608,14 @@ textarea:focus {
   color: var(--green-dark);
 }
 
-.section-status-approved {
+.section-status-approval {
   background: #eaf4ff;
   color: #23527c;
+}
+
+.section-status-approved {
+  background: #eaf8ef;
+  color: #1f6b3a;
 }
 
 .draft-content-button {
@@ -618,8 +632,23 @@ textarea:focus {
 
 .section-status-stack {
   display: grid;
-  justify-items: center;
+  justify-items: start;
   gap: 5px;
+}
+
+.section-status-control {
+  display: grid;
+  gap: 4px;
+}
+
+.section-status-control > span {
+  color: var(--muted);
+  font-size: 0.6rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  line-height: 1;
+  padding-left: 8px;
+  text-transform: uppercase;
 }
 
 .drafted-count {

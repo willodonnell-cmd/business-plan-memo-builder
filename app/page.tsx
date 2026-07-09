@@ -43,6 +43,7 @@ type WorkspaceModule = "Memo" | "Investment Requests";
 const roles: Role[] = ["Business Team", "Enablement", "Approver", "General Reader"];
 const enablementFunctions: EnablementFunction[] = ["HR", "Legal", "IT", "Finance & Accounting", "Tax", "Marketing", "CLS", "Other"];
 const approverPostures = ["Questions", "Approved"];
+const sectionStatusOptions: SectionStatus[] = ["Draft", "Review", "Approval", "Approved"];
 const emptySections: MemoSection[] = [];
 const emptyQuestions: Question[] = [];
 const emptyApprovers: Approver[] = [];
@@ -70,13 +71,14 @@ function questionStatusOptions(role: Role, currentStatus: QuestionStatus) {
 
 function sectionIsVisibleToRole(section: MemoSection, role: Role) {
   if (role === "Business Team") return true;
-  if (role === "Enablement") return section.status === "Review" || section.status === "Approved";
-  return section.status === "Approved";
+  if (role === "Enablement") return section.status === "Review" || section.status === "Approval" || section.status === "Approved";
+  return section.status === "Approval" || section.status === "Approved";
 }
 
 function sectionStatusLabel(status: SectionStatus) {
   if (status === "Review") return "For Review";
-  if (status === "Approved") return "For Approval";
+  if (status === "Approval") return "For Approval";
+  if (status === "Approved") return "Approved";
   return "Draft";
 }
 
@@ -123,14 +125,14 @@ export default function Home() {
   const memoWorkflowStatus =
     approvers.length > 0 && approvedCount === approvers.length
       ? "Approved"
-      : sections.some((section) => section.status === "Approved")
+      : sections.some((section) => section.status === "Approval" || section.status === "Approved")
         ? "Approval process"
         : sections.some((section) => section.status === "Review")
           ? "Review"
           : "Drafting";
   const sectionIndex = activeSection ? sections.findIndex((section) => section.id === activeSection.id) + 1 : 1;
-  const inReviewCount = sections.filter((section) => section.status === "Review" || section.status === "Approved").length;
-  const inApprovalCount = sections.filter((section) => section.status === "Approved").length;
+  const inReviewCount = sections.filter((section) => section.status === "Review" || section.status === "Approval" || section.status === "Approved").length;
+  const inApprovalCount = sections.filter((section) => section.status === "Approval" || section.status === "Approved").length;
   const openDependencies = questions.filter(
     (question) =>
       isOpenQuestionStatus(question.status) &&
@@ -626,9 +628,26 @@ export default function Home() {
                   <div className="editor-pane">
                     <div className="mb-3 flex items-center justify-between gap-3">
                       <div className="section-status-stack">
-                        <span className={`small-status small-status-active section-status-${activeSection.status.toLowerCase()}`}>
-                          {sectionStatusLabel(activeSection.status)}
-                        </span>
+                        <label className="section-status-control">
+                          <span>Change status</span>
+                          <select
+                            className={`small-status small-status-active section-status-${activeSection.status.toLowerCase()}`}
+                            value={activeSection.status}
+                            disabled={!canEditMemo}
+                            onChange={(event) =>
+                              void saveSection(activeSection, {
+                                content: activeSection.content,
+                                status: event.target.value as SectionStatus,
+                              })
+                            }
+                          >
+                            {sectionStatusOptions.map((status) => (
+                              <option key={status} value={status}>
+                                {sectionStatusLabel(status)}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
                         <span className="drafted-count">
                           {sections.filter((section) => section.content.trim()).length}/{sections.length} drafted
                         </span>
@@ -642,7 +661,7 @@ export default function Home() {
                             <button className="toolbar-button" onClick={() => void saveSection(activeSection, { content: activeSection.content, status: "Review" })}>
                               Save for Review
                             </button>
-                            <button className="toolbar-button toolbar-button-green" onClick={() => void saveSection(activeSection, { content: activeSection.content, status: "Approved" })}>
+                            <button className="toolbar-button toolbar-button-green" onClick={() => void saveSection(activeSection, { content: activeSection.content, status: "Approval" })}>
                               Save for Approval
                             </button>
                           </>

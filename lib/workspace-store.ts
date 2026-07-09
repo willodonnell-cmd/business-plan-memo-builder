@@ -110,7 +110,7 @@ type InvestmentRequestLineRow = {
 
 export type Actor = WorkspaceUser;
 
-const allowedSectionStatuses = ["Draft", "Review", "Approved"] as const;
+const allowedSectionStatuses = ["Draft", "Review", "Approval", "Approved"] as const;
 const allowedQuestionStatuses = ["Open", "Answered", "Resolved", "Reopened", "No Change Needed"] as const;
 const allowedIssueTypes = [
   "Clarification",
