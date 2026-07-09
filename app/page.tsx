@@ -1,10 +1,20 @@
 "use client";
 
-import { useEffect, useMemo, useState, type Dispatch, type ReactNode, type SetStateAction } from "react";
-import { businessPlanWorkstreams } from "../lib/workspace-defaults";
+import { useCallback, useEffect, useMemo, useState, type Dispatch, type ReactNode, type SetStateAction } from "react";
+import {
+  businessPlanWorkstreams,
+  emptyInvestmentRequestLine,
+  investmentCaseQuestions,
+  investmentWorkbookProfiles,
+} from "../lib/workspace-defaults";
 import type {
   Approver,
   EnablementFunction,
+  InvestmentRequest,
+  InvestmentRequestExport,
+  InvestmentRequestLine,
+  InvestmentRequestType,
+  InvestmentWorkbookProfile,
   IssueType,
   MemoSection,
   Mode,
@@ -21,16 +31,27 @@ type ApiPlanResponse = {
   error?: string;
 };
 
-type SaveState = "idle" | "saving" | "saved" | "error";
+type ApiInvestmentResponse = {
+  request?: InvestmentRequest;
+  requests?: InvestmentRequest[];
+  export?: InvestmentRequestExport;
+  error?: string;
+};
 
-const roles: Role[] = ["Business Team", "Enablement", "Approver"];
+type SaveState = "idle" | "saving" | "saved" | "error";
+type WorkspaceModule = "Memo" | "Investment Requests";
+
+const roles: Role[] = ["Business Team", "Enablement", "Approver", "General Reader"];
 const enablementFunctions: EnablementFunction[] = ["HR", "Legal", "IT", "Finance & Accounting", "Tax", "Marketing", "CLS", "Other"];
 const approverPostures = ["Questions", "Approved"];
 const emptySections: MemoSection[] = [];
 const emptyQuestions: Question[] = [];
 const emptyApprovers: Approver[] = [];
-const currentUserEmail = "wodonnell@prologis.com";
 const defaultPlanId = businessPlanWorkstreams[0].id;
+
+function workspaceModuleLabel(module: WorkspaceModule) {
+  return module === "Investment Requests" ? "G&A Engine" : module;
+}
 
 function isOpenQuestionStatus(status: QuestionStatus) {
   return status === "Open" || status === "Reopened";
@@ -62,10 +83,16 @@ function sectionStatusLabel(status: SectionStatus) {
 
 export default function Home() {
   const [plan, setPlan] = useState<WorkspacePlan | null>(null);
-  const [activePlanId, setActivePlanId] = useState(defaultPlanId);
+  const [activePlanId, setActivePlanId] = useState<string>(defaultPlanId);
   const [role, setRole] = useState<Role>("Business Team");
   const [mode, setMode] = useState<Mode>("Section");
+  const [workspaceModule, setWorkspaceModule] = useState<WorkspaceModule>("Memo");
   const [activeId, setActiveId] = useState("");
+  const [investmentRequests, setInvestmentRequests] = useState<InvestmentRequest[]>([]);
+  const [activeInvestmentId, setActiveInvestmentId] = useState("");
+  const [investmentSearch, setInvestmentSearch] = useState("");
+  const [investmentExport, setInvestmentExport] = useState<InvestmentRequestExport | null>(null);
+  const [investmentError, setInvestmentError] = useState("");
   const [showGuidance, setShowGuidance] = useState(true);
   const [showCoach, setShowCoach] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
@@ -83,6 +110,10 @@ export default function Home() {
   const sections = plan?.sections ?? emptySections;
   const questions = plan?.questions ?? emptyQuestions;
   const approvers = plan?.approvers ?? emptyApprovers;
+  const currentUser = plan?.user ?? null;
+  const canEditMemo = currentUser?.role === "Business Team";
+  const canParticipate = Boolean(currentUser && currentUser.role !== "General Reader");
+  const canSetApproval = currentUser?.role === "Business Team" || currentUser?.role === "Approver";
   const visibleSections = useMemo(
     () => sections.filter((section) => sectionIsVisibleToRole(section, role)),
     [sections, role],
@@ -91,6 +122,14 @@ export default function Home() {
   const planTitle = plan?.title ?? "2027 Essentials Business Plan";
   const openQuestions = questions.filter((question) => isOpenQuestionStatus(question.status)).length;
   const approvedCount = approvers.filter((approver) => approver.posture === "Approved").length;
+  const memoWorkflowStatus =
+    approvers.length > 0 && approvedCount === approvers.length
+      ? "Approved"
+      : sections.some((section) => section.status === "Approved")
+        ? "Approval process"
+        : sections.some((section) => section.status === "Review")
+          ? "Review"
+          : "Drafting";
   const sectionIndex = activeSection ? sections.findIndex((section) => section.id === activeSection.id) + 1 : 1;
   const inReviewCount = sections.filter((section) => section.status === "Review" || section.status === "Approved").length;
   const inApprovalCount = sections.filter((section) => section.status === "Approved").length;
@@ -104,6 +143,9 @@ export default function Home() {
   const selectedBusinessPlan = businessPlanWorkstreams.some((workstream) => workstream.id === activePlanId)
     ? activePlanId
     : defaultPlanId;
+  const activeInvestmentRequest =
+    investmentRequests.find((request) => request.id === activeInvestmentId) ?? investmentRequests[0] ?? null;
+  const workbookProfile = investmentWorkbookProfiles[selectedBusinessPlan] ?? null;
 
   const visibleQuestions = useMemo(() => {
     if (!activeSection) return [];
@@ -144,6 +186,41 @@ export default function Home() {
     return payload.plan;
   }
 
+  const requestInvestments = useCallback(async (path: string, init?: RequestInit) => {
+    setSaveState("saving");
+    setMessage(init ? "Saving G&A Engine request..." : "Loading G&A Engine requests...");
+    const response = await fetch(path, {
+      ...init,
+      headers: {
+        "content-type": "application/json",
+        ...(init?.headers ?? {}),
+      },
+    });
+    const payload = (await response.json()) as ApiInvestmentResponse;
+    if (!response.ok) {
+      setSaveState("error");
+      setInvestmentError(payload.error ?? "Investment request failed.");
+      setMessage(payload.error ?? "Investment request failed.");
+      throw new Error(payload.error ?? "Investment request failed.");
+    }
+    if (payload.requests) {
+      setInvestmentRequests(payload.requests);
+      setActiveInvestmentId((current) =>
+        payload.requests?.some((request) => request.id === current) ? current : payload.requests?.[0]?.id ?? "",
+      );
+    }
+    if (payload.request) {
+      setActiveInvestmentId(payload.request.id);
+    }
+    if (payload.export) {
+      setInvestmentExport(payload.export);
+    }
+    setInvestmentError("");
+    setSaveState("saved");
+    setMessage("Saved");
+    return payload;
+  }, []);
+
   function applyPlan(nextPlan: WorkspacePlan, nextMessage: string) {
     setPlan(nextPlan);
     setActivePlanId(nextPlan.id);
@@ -168,7 +245,7 @@ export default function Home() {
 
   async function addQuestion() {
     const body = questionDraft.trim();
-    if (!activeSection || !body || isAddingQuestion) return;
+    if (!activeSection || !body || isAddingQuestion || !canParticipate) return;
     setIsAddingQuestion(true);
     try {
       const nextPlan = await requestPlan("/api/questions", {
@@ -176,8 +253,6 @@ export default function Home() {
         body: JSON.stringify({
           planId: activePlanId,
           sectionId: activeSection.id,
-          author: role === "Business Team" ? "Business Team" : role,
-          role,
           visibility,
           issueType: role === "Approver" ? "Approval Concern" : role === "Enablement" ? "Support Need" : issueType,
           functionName: role === "Enablement" ? enablementFunction : "",
@@ -195,14 +270,14 @@ export default function Home() {
   async function saveQuestion(question: Question, patch: Partial<Pick<Question, "status" | "response">>) {
     const nextPlan = await requestPlan(`/api/questions/${encodeURIComponent(question.id)}`, {
       method: "PATCH",
-      body: JSON.stringify({ ...patch, role, planId: activePlanId }),
+      body: JSON.stringify({ ...patch, planId: activePlanId }),
     });
     applyPlan(nextPlan, "Question saved");
   }
 
   async function removeQuestion(question: Question) {
     const nextPlan = await requestPlan(
-      `/api/questions/${encodeURIComponent(question.id)}?role=${encodeURIComponent(role)}&planId=${encodeURIComponent(activePlanId)}`,
+      `/api/questions/${encodeURIComponent(question.id)}?planId=${encodeURIComponent(activePlanId)}`,
       { method: "DELETE" },
     );
     applyPlan(nextPlan, "Question deleted");
@@ -211,12 +286,100 @@ export default function Home() {
   async function changePlanSelection(nextPlanId: string) {
     setActivePlanId(nextPlanId);
     setActiveId("");
+    setActiveInvestmentId("");
+    setInvestmentExport(null);
     const nextPlan = await requestPlan(`/api/plan?planId=${encodeURIComponent(nextPlanId)}`);
     applyPlan(nextPlan, "Loaded");
+    const query = new URLSearchParams({ planId: nextPlanId });
+    if (investmentSearch.trim()) query.set("q", investmentSearch.trim());
+    await requestInvestments(`/api/investment-requests?${query.toString()}`);
+  }
+
+  async function createInvestmentRequest(requestType: InvestmentRequestType) {
+    try {
+      const payload = await requestInvestments("/api/investment-requests", {
+        method: "POST",
+        body: JSON.stringify({ planId: activePlanId, requestType }),
+      });
+      setInvestmentExport(null);
+      if (payload.request) setActiveInvestmentId(payload.request.id);
+    } catch {
+      return;
+    }
+  }
+
+  async function saveInvestmentRequest(request: InvestmentRequest, submit = false) {
+    try {
+      const payload = await requestInvestments(`/api/investment-requests/${encodeURIComponent(request.id)}`, {
+        method: "PATCH",
+        body: JSON.stringify({ ...request, planId: activePlanId, submit }),
+      });
+      setInvestmentExport(null);
+      if (payload.request) setActiveInvestmentId(payload.request.id);
+      setShowSavedToast(true);
+    } catch {
+      return;
+    }
+  }
+
+  async function loadInvestmentExport(request: InvestmentRequest) {
+    try {
+      const query = new URLSearchParams({ planId: activePlanId });
+      await requestInvestments(`/api/investment-requests/${encodeURIComponent(request.id)}/export?${query.toString()}`);
+    } catch {
+      return;
+    }
+  }
+
+  async function downloadInvestmentWorkbook(request: InvestmentRequest) {
+    setSaveState("saving");
+    setMessage("Generating workbook...");
+    setInvestmentError("");
+    try {
+      const query = new URLSearchParams({ planId: activePlanId, format: "xlsx" });
+      const response = await fetch(`/api/investment-requests/${encodeURIComponent(request.id)}/export?${query.toString()}`);
+      if (!response.ok) {
+        const payload = (await response.json().catch(() => ({}))) as { error?: string };
+        throw new Error(payload.error ?? "Workbook export failed.");
+      }
+      const blob = await response.blob();
+      const disposition = response.headers.get("content-disposition") ?? "";
+      const fileName = disposition.match(/filename="([^"]+)"/)?.[1] ?? "investment-request-export.xlsx";
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = fileName;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+      setSaveState("saved");
+      setMessage("Workbook generated");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Workbook export failed.";
+      setSaveState("error");
+      setMessage(message);
+      setInvestmentError(message);
+    }
+  }
+
+  async function deleteInvestmentRequest(request: InvestmentRequest) {
+    try {
+      const query = new URLSearchParams({ planId: activePlanId });
+      const payload = await requestInvestments(`/api/investment-requests/${encodeURIComponent(request.id)}?${query.toString()}`, {
+        method: "DELETE",
+      });
+      setInvestmentExport(null);
+      setActiveInvestmentId((current) => (current === request.id ? payload.requests?.[0]?.id ?? "" : current));
+      setShowSavedToast(true);
+    } catch {
+      return;
+    }
   }
 
   async function changeApproverMode(value: string) {
     if (!currentApprover) return;
+    if (!canSetApproval) return;
     const posture = value === "Approved" ? "Approved" : "Questions";
     const nextPlan = await requestPlan(`/api/approvers/${encodeURIComponent(currentApprover.id)}`, {
       method: "PATCH",
@@ -239,7 +402,8 @@ export default function Home() {
   }
 
   function canDelete(question: Question) {
-    return role === "Business Team" || question.role === role;
+    if (!currentUser || currentUser.role === "General Reader") return false;
+    return currentUser.role === "Business Team" || question.role === currentUser.role;
   }
 
   function switchRole(nextRole: Role) {
@@ -262,7 +426,10 @@ export default function Home() {
       setMessage("Loading...");
       try {
         const nextPlan = await requestPlan(`/api/plan?planId=${encodeURIComponent(defaultPlanId)}`);
-        if (!cancelled) applyPlan(nextPlan, "Loaded");
+        if (!cancelled) {
+          applyPlan(nextPlan, "Loaded");
+          void requestInvestments(`/api/investment-requests?planId=${encodeURIComponent(defaultPlanId)}`);
+        }
       } catch (error) {
         if (!cancelled) {
           setMessage(error instanceof Error ? error.message : "Could not load workspace.");
@@ -275,7 +442,27 @@ export default function Home() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [requestInvestments]);
+
+  useEffect(() => {
+    if (!plan) return;
+    const timeout = window.setTimeout(() => {
+      const query = new URLSearchParams({ planId: activePlanId });
+      if (investmentSearch.trim()) query.set("q", investmentSearch.trim());
+      void requestInvestments(`/api/investment-requests?${query.toString()}`);
+    }, 250);
+    return () => window.clearTimeout(timeout);
+  }, [activePlanId, investmentSearch, plan, requestInvestments]);
+
+  useEffect(() => {
+    if (!plan) return;
+    const interval = window.setInterval(() => {
+      void requestPlan(`/api/plan?planId=${encodeURIComponent(activePlanId)}`)
+        .then((nextPlan) => applyPlan(nextPlan, "Loaded"))
+        .catch(() => undefined);
+    }, 15000);
+    return () => window.clearInterval(interval);
+  }, [activePlanId, plan]);
 
   useEffect(() => {
     if (!showSavedToast) return;
@@ -344,26 +531,84 @@ export default function Home() {
             <p>{roleFocus(role).body}</p>
           </div>
 
-          <div className="segmented">
-            {(["Section", "Full Memo"] as Mode[]).map((item) => (
+          <div className="segmented" aria-label="Workspace module">
+            {(["Memo", "Investment Requests"] as WorkspaceModule[]).map((item) => (
               <button
                 key={item}
-                className={`segmented-button ${mode === item ? "segmented-button-active" : ""}`}
-                onClick={() => setMode(item)}
+                className={`segmented-button ${workspaceModule === item ? "segmented-button-active" : ""}`}
+                onClick={() => setWorkspaceModule(item)}
               >
-                {item === "Full Memo" ? "Full memo" : "Section"}
+                {workspaceModuleLabel(item)}
               </button>
             ))}
           </div>
 
-          <div className="workflow-metrics">
-            <Metric label="Memo approval" value={`${approvedCount}/${approvers.length || 0} approved`} />
-            <Metric label="Questions" value={`${openQuestions} open`} />
-            {saveState !== "idle" ? <span className={`save-state save-state-${saveState}`}>{message}</span> : null}
+          <div className="workflow-controls">
+            {workspaceModule === "Memo" ? (
+              <div className="memo-mode-tools">
+                <div className="segmented" aria-label="Memo mode">
+                  {(["Section", "Full Memo"] as Mode[]).map((item) => (
+                    <button
+                      key={item}
+                      className={`segmented-button ${mode === item ? "segmented-button-active" : ""}`}
+                      onClick={() => setMode(item)}
+                    >
+                      {item === "Full Memo" ? "Full memo" : "Section"}
+                    </button>
+                  ))}
+                </div>
+                <button className="help-icon-button" type="button" aria-label="Help" title="Help" onClick={() => setShowHelp(true)}>
+                  ?
+                </button>
+              </div>
+            ) : null}
+
+            <div className="workflow-metrics">
+              {workspaceModule === "Investment Requests" ? (
+                <>
+                  <Metric label="Requests" value={`${investmentRequests.length} total`} />
+                  <Metric label="Submitted" value={`${investmentRequests.filter((request) => request.status === "Submitted").length} submitted`} />
+                </>
+              ) : (
+                <>
+                  <div className="memo-status-button" aria-label={`Memo status: ${memoWorkflowStatus}`}>
+                    <span>Status:</span>
+                    <strong>{memoWorkflowStatus}</strong>
+                  </div>
+                  <div className="memo-status-button memo-questions-button" aria-label={`Questions: ${openQuestions} open`}>
+                    <span>Questions:</span>
+                    <strong>{openQuestions} open</strong>
+                  </div>
+                </>
+              )}
+              {saveState !== "idle" ? <span className={`save-state save-state-${saveState}`}>{message}</span> : null}
+            </div>
           </div>
         </div>
 
-        {mode === "Section" ? (
+        {workspaceModule === "Investment Requests" ? (
+          <InvestmentRequestsWorkspace
+            key={activeInvestmentRequest?.id ?? "investment-requests-empty"}
+            profile={workbookProfile}
+            requests={investmentRequests}
+            activeRequest={activeInvestmentRequest}
+            exportPreview={investmentExport}
+            search={investmentSearch}
+            error={investmentError}
+            canEdit={canEditMemo}
+            onSearch={setInvestmentSearch}
+            onSelect={(id) => {
+              setActiveInvestmentId(id);
+              setInvestmentExport(null);
+            }}
+            onCreate={createInvestmentRequest}
+            onSave={(request) => saveInvestmentRequest(request)}
+            onSubmit={(request) => saveInvestmentRequest(request, true)}
+            onExport={loadInvestmentExport}
+            onDownload={downloadInvestmentWorkbook}
+            onDelete={deleteInvestmentRequest}
+          />
+        ) : mode === "Section" ? (
           <div className="section-layout">
             <MemoOutline
               sections={visibleSections}
@@ -375,30 +620,34 @@ export default function Home() {
             />
             {activeSection ? (
               <section className="section-shell">
+                <button
+                  className="coach-avatar-button"
+                  type="button"
+                  aria-label="Open Coach P"
+                  title="Open Coach P"
+                  onClick={() => setShowCoach(true)}
+                />
                 <div className="section-header">
                   <div>
                     <p className="eyebrow">Section {sectionIndex}</p>
                     <h2 className="mt-2 text-3xl font-bold">{activeSection.title}</h2>
                     <p className="mt-2 text-base text-[#69665c]">{sectionSubtitle(activeSection)}</p>
                   </div>
-                  <button className="help-button" type="button" onClick={() => setShowHelp(true)}>
-                    Help
-                  </button>
                 </div>
 
                 <div className="section-editor-layout">
                   <div className="editor-pane">
                     <div className="mb-3 flex items-center justify-between gap-3">
-                      <div className="flex flex-wrap gap-2">
+                      <div className="section-status-stack">
                         <span className={`small-status small-status-active section-status-${activeSection.status.toLowerCase()}`}>
                           {sectionStatusLabel(activeSection.status)}
                         </span>
+                        <span className="drafted-count">
+                          {sections.filter((section) => section.content.trim()).length}/{sections.length} drafted
+                        </span>
                       </div>
                       <div className="section-actions">
-                        <button className="draft-content-button" type="button">
-                          {sections.filter((section) => section.content.trim()).length}/{sections.length} drafted
-                        </button>
-                        {role === "Business Team" ? (
+                        {canEditMemo ? (
                           <>
                             <button className="toolbar-button" onClick={() => void saveSection(activeSection, { content: activeSection.content, status: "Draft" })}>
                               Save Draft
@@ -406,14 +655,14 @@ export default function Home() {
                             <button className="toolbar-button" onClick={() => void saveSection(activeSection, { content: activeSection.content, status: "Review" })}>
                               Save for Review
                             </button>
-                            <button className="primary-button" onClick={() => void saveSection(activeSection, { content: activeSection.content, status: "Approved" })}>
+                            <button className="toolbar-button toolbar-button-green" onClick={() => void saveSection(activeSection, { content: activeSection.content, status: "Approved" })}>
                               Save for Approval
                             </button>
                           </>
                         ) : null}
                       </div>
                     </div>
-                    {role === "Business Team" ? (
+                    {canEditMemo ? (
                       <textarea
                         className="memo-editor"
                         value={activeSection.content}
@@ -434,13 +683,15 @@ export default function Home() {
                       <b>{showGuidance ? "Hide" : "Show"}</b>
                     </button>
                     {showGuidance ? <Guidance section={activeSection} /> : null}
-                    <button className="coach-button" onClick={() => setShowCoach(true)}>GPT Coach</button>
                     <button className="questions-button" onClick={() => setQuestionsOpen(!questionsOpen)}>
                       Questions ({visibleQuestions.length})
                     </button>
                     {questionsOpen ? (
                       <QuestionPanel
                         role={role}
+                        currentUserEmail={currentUser?.email ?? ""}
+                        canParticipate={canParticipate}
+                        canEditMemo={canEditMemo}
                         questions={visibleQuestions}
                         visibility={visibility}
                         issueType={issueType}
@@ -492,6 +743,9 @@ export default function Home() {
                   {questionsOpen ? (
                     <QuestionDrawer
                       role={role}
+                      currentUserEmail={currentUser?.email ?? ""}
+                      canParticipate={canParticipate}
+                      canEditMemo={canEditMemo}
                       questions={allVisibleQuestions}
                       visibility={visibility}
                       issueType={issueType}
@@ -517,6 +771,9 @@ export default function Home() {
                   {questionsOpen ? (
                     <QuestionDrawer
                       role={role}
+                      currentUserEmail={currentUser?.email ?? ""}
+                      canParticipate={canParticipate}
+                      canEditMemo={canEditMemo}
                       questions={allVisibleQuestions}
                       visibility={visibility}
                       issueType={issueType}
@@ -545,6 +802,9 @@ export default function Home() {
                 <>
                   <QuestionDrawer
                     role={role}
+                    currentUserEmail={currentUser?.email ?? ""}
+                    canParticipate={canParticipate}
+                    canEditMemo={canEditMemo}
                     questions={allVisibleQuestions}
                     visibility={visibility}
                     issueType={issueType}
@@ -576,7 +836,7 @@ export default function Home() {
       </div>
 
       {showCoach && activeSection ? (
-        <Modal title="GPT Coach" onClose={() => setShowCoach(false)}>
+        <Modal title="Coach P" onClose={() => setShowCoach(false)}>
           <CoachActions section={activeSection} />
         </Modal>
       ) : null}
@@ -616,6 +876,12 @@ function roleFocus(role: Role) {
     return {
       label: "Enablement Read / Questions",
       body: "Read the full plan as a partner function. Ask clarifying questions and flag dependencies, support needs, constraints, or required inputs. This is not an approval state.",
+    };
+  }
+  if (role === "General Reader") {
+    return {
+      label: "Read Only",
+      body: "Read the released memo state. Server permissions prevent memo edits, workflow writes, and approval changes for reader accounts.",
     };
   }
   return {
@@ -687,6 +953,536 @@ function Guidance({ section }: { section: MemoSection }) {
   );
 }
 
+function InvestmentRequestsWorkspace({
+  profile,
+  requests,
+  activeRequest,
+  exportPreview,
+  search,
+  error,
+  canEdit,
+  onSearch,
+  onSelect,
+  onCreate,
+  onSave,
+  onSubmit,
+  onExport,
+  onDownload,
+  onDelete,
+}: {
+  profile: InvestmentWorkbookProfile | null;
+  requests: InvestmentRequest[];
+  activeRequest: InvestmentRequest | null;
+  exportPreview: InvestmentRequestExport | null;
+  search: string;
+  error: string;
+  canEdit: boolean;
+  onSearch: (value: string) => void;
+  onSelect: (id: string) => void;
+  onCreate: (requestType: InvestmentRequestType) => Promise<void>;
+  onSave: (request: InvestmentRequest) => Promise<void>;
+  onSubmit: (request: InvestmentRequest) => Promise<void>;
+  onExport: (request: InvestmentRequest) => Promise<void>;
+  onDownload: (request: InvestmentRequest) => Promise<void>;
+  onDelete: (request: InvestmentRequest) => Promise<void>;
+}) {
+  const [draft, setDraft] = useState<InvestmentRequest | null>(activeRequest);
+  const [showHeadCountGpt, setShowHeadCountGpt] = useState(false);
+
+  if (!profile) {
+    return (
+      <section className="investment-empty">
+        <p className="eyebrow">G&A Engine</p>
+        <h2>No G&A workbook template is configured for this business plan.</h2>
+        <p>Phase 1 only supports the uploaded Data Centers, Energy Solutions, Essentials, and Strategic Capital workbooks.</p>
+      </section>
+    );
+  }
+
+  const submitted = requests.filter((request) => request.status === "Submitted").length;
+
+  function updateDraft(patch: Partial<InvestmentRequest>) {
+    setDraft((current) => (current ? { ...current, ...patch } : current));
+  }
+
+  function updateLine(id: string, patch: Partial<InvestmentRequestLine>) {
+    setDraft((current) =>
+      current
+        ? {
+            ...current,
+            lines: current.lines.map((line) => (line.id === id ? { ...line, ...patch } : line)),
+          }
+        : current,
+    );
+  }
+
+  function addLine() {
+    setDraft((current) =>
+      current
+        ? {
+            ...current,
+            lines: [
+              ...current.lines,
+              {
+                ...emptyInvestmentRequestLine,
+                id: crypto.randomUUID(),
+                lineType: current.requestType,
+              },
+            ],
+          }
+        : current,
+    );
+  }
+
+  function removeLine(id: string) {
+    setDraft((current) =>
+      current
+        ? {
+            ...current,
+            lines: current.lines.length > 1 ? current.lines.filter((line) => line.id !== id) : current.lines,
+          }
+        : current,
+    );
+  }
+
+  return (
+    <div className="investment-layout">
+      <aside className="investment-sidebar">
+        <div>
+          <p className="eyebrow">G&A Engine</p>
+          <h2>{profile.businessUnit}</h2>
+          <p>{submitted}/{requests.length || 0} submitted</p>
+        </div>
+        <input
+          value={search}
+          onChange={(event) => onSearch(event.target.value)}
+          placeholder="Search owner, title, milestone, amount, or keyword"
+          aria-label="Search G&A Engine requests"
+        />
+        <div className="investment-create-row">
+          <button className="primary-button" disabled={!canEdit} onClick={() => void onCreate("Payroll / Headcount")}>
+            Create New Headcount
+          </button>
+          <button className="toolbar-button" disabled={!canEdit} onClick={() => void onCreate("Non-Payroll")}>
+            Create New Non-Payroll
+          </button>
+        </div>
+        <div className="investment-request-list">
+          {requests.length === 0 ? <p className="empty-note">No G&A Engine requests yet.</p> : null}
+          {requests.map((request) => (
+            <div
+              key={request.id}
+              className={`investment-list-item ${activeRequest?.id === request.id ? "investment-list-item-active" : ""}`}
+              onClick={() => onSelect(request.id)}
+              role="button"
+              tabIndex={0}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" || event.key === " ") {
+                  event.preventDefault();
+                  onSelect(request.id);
+                }
+              }}
+            >
+              <button
+                className="investment-delete-button"
+                type="button"
+                title="Delete request"
+                aria-label={`Delete ${request.initiative || "untitled investment request"}`}
+                disabled={!canEdit}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  if (window.confirm("Delete this investment request? This removes it from the system.")) {
+                    void onDelete(request);
+                  }
+                }}
+              >
+                ×
+              </button>
+              <span>{request.initiative || "Untitled request"}</span>
+              <small>{request.requestType} · {request.status}</small>
+            </div>
+          ))}
+        </div>
+      </aside>
+
+      <section className="investment-main">
+        <button
+          className="headcount-help-avatar-button investment-panel-help"
+          type="button"
+          aria-label="Open Head Count Request GPT"
+          title="Open Head Count Request GPT"
+          onClick={() => setShowHeadCountGpt(true)}
+        />
+        {error ? <div className="investment-error">{error}</div> : null}
+        {showHeadCountGpt ? (
+          <Modal title="Head Count Request GPT" onClose={() => setShowHeadCountGpt(false)}>
+            <HeadCountRequestGpt request={draft} />
+          </Modal>
+        ) : null}
+        {!draft ? (
+          <div className="investment-empty">
+            <p className="eyebrow">Guided intake</p>
+            <h2>Create an investment request</h2>
+            <p>Use the workbook-derived form to create a structured request tied to this business plan.</p>
+          </div>
+        ) : (
+          <>
+            <div className="investment-header">
+              <div>
+                <p className="eyebrow">{draft.requestType}</p>
+                <h2>{draft.initiative || "Untitled investment request"}</h2>
+              </div>
+              <div className="investment-actions">
+                <span className={`small-status small-status-active ${draft.status === "Submitted" ? "section-status-approved" : "section-status-draft"}`}>
+                  {draft.status}
+                </span>
+                <div className="investment-action-area">
+                  <div className="investment-button-grid">
+                    <button className="toolbar-button" disabled={!canEdit} onClick={() => draft && void onSave(draft)}>
+                      Save Draft
+                    </button>
+                    <button className="toolbar-button toolbar-button-green" disabled={!canEdit} onClick={() => draft && void onSubmit(draft)}>
+                      Submit
+                    </button>
+                    <button className="toolbar-button" onClick={() => draft && void onExport(draft)}>
+                      Export Preview
+                    </button>
+                    <button className="toolbar-button toolbar-button-green" onClick={() => draft && void onDownload(draft)}>
+                      Download Work
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="investment-form-grid">
+              <label>
+                <span>Owner</span>
+                <input value={draft.ownerName} onChange={(event) => updateDraft({ ownerName: event.target.value })} disabled={!canEdit} />
+              </label>
+              <label>
+                <span>Owner email</span>
+                <input value={draft.ownerEmail} onChange={(event) => updateDraft({ ownerEmail: event.target.value })} disabled={!canEdit} />
+              </label>
+              <label className="investment-wide">
+                <span>Title</span>
+                <input value={draft.initiative} onChange={(event) => updateDraft({ initiative: event.target.value })} disabled={!canEdit} />
+              </label>
+            </div>
+
+            <div className="investment-question-grid">
+              {investmentCaseQuestions.map((question) => (
+                <label key={question.key}>
+                  <span>{question.question}</span>
+                  <small>{question.guidance}</small>
+                  <textarea
+                    value={String(draft[question.key] ?? "")}
+                    onChange={(event) => updateDraft({ [question.key]: event.target.value } as Partial<InvestmentRequest>)}
+                    disabled={!canEdit}
+                  />
+                </label>
+              ))}
+            </div>
+
+            <div className="investment-lines-head">
+              <div>
+                <p className="eyebrow">Workbook input rows</p>
+                <h3>{draft.requestType}</h3>
+              </div>
+              <button className="toolbar-button" disabled={!canEdit} onClick={addLine}>Add row</button>
+            </div>
+
+            <div className="investment-lines">
+              {draft.lines.map((line, index) => (
+                <InvestmentLineEditor
+                  key={line.id}
+                  index={index}
+                  line={line}
+                  requestType={draft.requestType}
+                  groups={profile.groups}
+                  expenseTypes={profile.expenseTypes}
+                  canEdit={canEdit}
+                  onChange={(patch) => updateLine(line.id, patch)}
+                  onRemove={() => removeLine(line.id)}
+                />
+              ))}
+            </div>
+
+            <InvestmentSummary request={draft} />
+            {exportPreview ? <InvestmentExportPreview preview={exportPreview} /> : null}
+          </>
+        )}
+      </section>
+    </div>
+  );
+}
+
+function HeadCountRequestGpt({ request }: { request: InvestmentRequest | null }) {
+  const [prompt, setPrompt] = useState("What role is this for?");
+  const [result, setResult] = useState("");
+  const [error, setError] = useState("");
+  const [isWorking, setIsWorking] = useState(false);
+
+  async function runHeadCountGpt() {
+    const nextPrompt = prompt.trim();
+    if (!nextPrompt || isWorking) return;
+    setIsWorking(true);
+    setError("");
+    setResult("");
+    try {
+      const response = await fetch("/api/head-count-request-gpt", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          prompt: nextPrompt,
+          requestContext: {
+            initiative: request?.initiative,
+            strategicObjective: request?.strategicObjective,
+            milestone: request?.milestone,
+            alternatives: request?.alternatives,
+            measurableOutcome: request?.measurableOutcome,
+            notApprovedImpact: request?.notApprovedImpact,
+            lines: (request?.lines ?? [])
+              .filter((line) => line.lineType === "Payroll / Headcount")
+              .map((line) => ({
+                jobTitle: line.jobTitle,
+                roleHire: line.roleHire,
+                location: line.location,
+                responsibilities: line.responsibilities,
+                hireDate: line.hireDate,
+                notesRationale: line.notesRationale,
+              })),
+          },
+        }),
+      });
+      const payload = (await response.json()) as { result?: string; error?: string };
+      if (!response.ok || !payload.result) {
+        throw new Error(payload.error ?? "Head Count Request GPT request failed.");
+      }
+      setResult(payload.result);
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : "Head Count Request GPT request failed.");
+    } finally {
+      setIsWorking(false);
+    }
+  }
+
+  return (
+    <div className="headcount-gpt">
+      <textarea
+        className="coach-box"
+        value={prompt}
+        onChange={(event) => setPrompt(event.target.value)}
+        placeholder="Ask for concise headcount request drafting help."
+      />
+      <div className="headcount-gpt-actions">
+        <button className="primary-button" disabled={!prompt.trim() || isWorking} onClick={() => void runHeadCountGpt()}>
+          {isWorking ? "Drafting..." : "Draft"}
+        </button>
+      </div>
+      {error ? (
+        <div className="coach-output coach-output-error" role="alert">
+          <p className="eyebrow">Head Count Request GPT error</p>
+          <pre>{error}</pre>
+        </div>
+      ) : null}
+      {result ? (
+        <div className="coach-output" role="status" aria-live="polite">
+          <p className="eyebrow">Head Count Request GPT response</p>
+          <pre>{result}</pre>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function InvestmentLineEditor({
+  index,
+  line,
+  requestType,
+  groups,
+  expenseTypes,
+  canEdit,
+  onChange,
+  onRemove,
+}: {
+  index: number;
+  line: InvestmentRequestLine;
+  requestType: InvestmentRequestType;
+  groups: string[];
+  expenseTypes: string[];
+  canEdit: boolean;
+  onChange: (patch: Partial<InvestmentRequestLine>) => void;
+  onRemove: () => void;
+}) {
+  const hasGroups = groups.length > 0;
+  return (
+    <article className="investment-line-card">
+      <div className="investment-line-title">
+        <strong>Row {index + 1}</strong>
+        <button className="icon-button" disabled={!canEdit} title="Remove row" onClick={onRemove}>×</button>
+      </div>
+      {requestType === "Payroll / Headcount" ? (
+        <div className="investment-form-grid">
+          <p className="investment-sensitive-note investment-wide">
+            Compensation details stay in the restricted Excel and HR/FP&A process. Capture only the business context here.
+          </p>
+          <Field label="Job Title" value={line.jobTitle} disabled={!canEdit} onChange={(value) => onChange({ jobTitle: value })} />
+          {hasGroups ? (
+            <SelectField label="Group" value={line.group} options={groups} disabled={!canEdit} onChange={(value) => onChange({ group: value })} />
+          ) : null}
+          <Field label="Role / Hire" value={line.roleHire} disabled={!canEdit} onChange={(value) => onChange({ roleHire: value })} />
+          <Field label="Location (City/Country)" value={line.location} disabled={!canEdit} onChange={(value) => onChange({ location: value })} />
+          <Field label="Hire Date" type="date" value={line.hireDate} disabled={!canEdit} onChange={(value) => onChange({ hireDate: value })} />
+          <label className="investment-wide">
+            <span>Key Job Responsibilities</span>
+            <textarea value={line.responsibilities} disabled={!canEdit} onChange={(event) => onChange({ responsibilities: event.target.value })} />
+          </label>
+          <label className="investment-wide">
+            <span>Notes / Rationale</span>
+            <textarea value={line.notesRationale} disabled={!canEdit} onChange={(event) => onChange({ notesRationale: event.target.value })} />
+          </label>
+        </div>
+      ) : (
+        <div className="investment-form-grid">
+          <Field label="Expense Description" value={line.expenseDescription} disabled={!canEdit} onChange={(value) => onChange({ expenseDescription: value })} />
+          {hasGroups ? (
+            <SelectField label="Group" value={line.group} options={groups} disabled={!canEdit} onChange={(value) => onChange({ group: value })} />
+          ) : null}
+          <SelectField label="Type of Expense" value={line.expenseType} options={expenseTypes} disabled={!canEdit} onChange={(value) => onChange({ expenseType: value })} />
+          <Field label="Vendor" value={line.vendor} disabled={!canEdit} onChange={(value) => onChange({ vendor: value })} />
+          <NumberField label="Annualized Spend" value={line.annualizedSpend} disabled={!canEdit} onChange={(value) => onChange({ annualizedSpend: value })} />
+          <label className="investment-wide">
+            <span>Notes / Rationale</span>
+            <textarea value={line.notesRationale} disabled={!canEdit} onChange={(event) => onChange({ notesRationale: event.target.value })} />
+          </label>
+        </div>
+      )}
+    </article>
+  );
+}
+
+function Field({
+  label,
+  value,
+  type = "text",
+  disabled,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  type?: string;
+  disabled: boolean;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <label>
+      <span>{label}</span>
+      <input type={type} value={value} disabled={disabled} onChange={(event) => onChange(event.target.value)} />
+    </label>
+  );
+}
+
+function NumberField({
+  label,
+  value,
+  disabled,
+  step = "1",
+  onChange,
+}: {
+  label: string;
+  value: number | null;
+  disabled: boolean;
+  step?: string;
+  onChange: (value: number | null) => void;
+}) {
+  return (
+    <label>
+      <span>{label}</span>
+      <input
+        type="number"
+        step={step}
+        value={value ?? ""}
+        disabled={disabled}
+        onChange={(event) => onChange(event.target.value === "" ? null : Number(event.target.value))}
+      />
+    </label>
+  );
+}
+
+function SelectField({
+  label,
+  value,
+  options,
+  disabled,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  options: string[];
+  disabled: boolean;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <label>
+      <span>{label}</span>
+      <select value={value} disabled={disabled} onChange={(event) => onChange(event.target.value)}>
+        <option value="">Select</option>
+        {options.map((option) => (
+          <option key={option}>{option}</option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
+function InvestmentSummary({ request }: { request: InvestmentRequest }) {
+  const total = request.lines.reduce((sum, line) => sum + (line.annualizedSpend ?? 0), 0);
+  const amountMetric =
+    request.requestType === "Payroll / Headcount"
+      ? "Completed in restricted Excel"
+      : formatCurrency(total);
+  return (
+    <section className="investment-summary">
+      <p className="eyebrow">Executive summary</p>
+      <p>
+        {request.ownerName || "The business owner"} is requesting {request.requestType.toLowerCase()} investment for {request.initiative || "an unnamed title"}.
+        The request supports {request.strategicObjective || "a strategic objective not yet specified"} and is tied to {request.milestone || "a milestone not yet specified"}.
+      </p>
+      <p>
+        Expected outcome: {request.measurableOutcome || "not specified"}. If not approved: {request.notApprovedImpact || "not specified"}.
+      </p>
+      <div className="investment-summary-metrics">
+        <Metric label="Rows" value={`${request.lines.length}`} />
+        <Metric label={request.requestType === "Payroll / Headcount" ? "Compensation detail" : "Input amount"} value={amountMetric} />
+        <Metric label="Status" value={request.status} />
+      </div>
+    </section>
+  );
+}
+
+function InvestmentExportPreview({ preview }: { preview: InvestmentRequestExport }) {
+  return (
+    <section className="investment-export">
+      <p className="eyebrow">Paste-ready Excel export</p>
+      <h3>{preview.workbookName}</h3>
+      <p>Target sheet: {preview.targetSheet}</p>
+      <label>
+        <span>Payroll / Headcount input range: {preview.payrollRange}</span>
+        <textarea readOnly value={preview.payrollTsv} />
+      </label>
+      <label>
+        <span>Non-Payroll input range: {preview.nonPayrollRange}</span>
+        <textarea readOnly value={preview.nonPayrollTsv} />
+      </label>
+    </section>
+  );
+}
+
+function formatCurrency(value: number) {
+  return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(value);
+}
+
 function QuestionPanel(props: QuestionPanelProps) {
   return (
     <div className="question-panel">
@@ -740,6 +1536,9 @@ function ApproverModeControl({
 
 type QuestionPanelProps = {
   role: Role;
+  currentUserEmail: string;
+  canParticipate: boolean;
+  canEditMemo: boolean;
   questions: Question[];
   visibility: Visibility;
   issueType: IssueType;
@@ -760,6 +1559,8 @@ type QuestionPanelProps = {
 
 function QuestionComposer({
   role,
+  currentUserEmail,
+  canParticipate,
   visibility,
   enablementFunction,
   questionDraft,
@@ -772,7 +1573,7 @@ function QuestionComposer({
   return (
     <div className="question-composer">
       <p className="eyebrow">Ask a question</p>
-      <p className="mt-2 text-xs text-[#756f64]">Signed in as {currentUserEmail}</p>
+      <p className="mt-2 text-xs text-[#756f64]">Signed in as {currentUserEmail || "unknown user"}</p>
       <textarea
         value={questionDraft}
         onChange={(event) => setQuestionDraft(event.target.value)}
@@ -796,7 +1597,7 @@ function QuestionComposer({
         <button
           className="send-button"
           title={`Ask as ${role}`}
-          disabled={isAddingQuestion || !questionDraft.trim()}
+          disabled={isAddingQuestion || !questionDraft.trim() || !canParticipate}
           onClick={() => void addQuestion()}
         >
           {isAddingQuestion ? "Submitting" : "Submit"}
@@ -808,6 +1609,8 @@ function QuestionComposer({
 
 function QuestionList({
   role,
+  canParticipate,
+  canEditMemo,
   questions,
   responseDrafts,
   setResponseDrafts,
@@ -838,6 +1641,7 @@ function QuestionList({
             <select
               aria-label="Question status"
               value={question.status}
+              disabled={!canParticipate}
               onChange={(event) => void saveQuestion(question, { status: event.target.value as QuestionStatus })}
             >
               {questionStatusOptions(role, question.status).map((status) => (
@@ -846,7 +1650,7 @@ function QuestionList({
             </select>
           </div>
           <p className="question-body">{question.body}</p>
-          {role === "Business Team" ? (
+          {canEditMemo ? (
             <div className="response-editor">
               <p className="eyebrow">Business response</p>
               <textarea
@@ -1036,11 +1840,11 @@ function CoachActions({ section }: { section: MemoSection }) {
       });
       const payload = (await response.json()) as { result?: string; error?: string };
       if (!response.ok || !payload.result) {
-        throw new Error(payload.error ?? "GPT Coach request failed.");
+        throw new Error(payload.error ?? "Coach P request failed.");
       }
       setCoachResult(payload.result);
     } catch (error) {
-      setCoachError(error instanceof Error ? error.message : "GPT Coach request failed.");
+      setCoachError(error instanceof Error ? error.message : "Coach P request failed.");
     } finally {
       setIsCoaching(false);
     }
@@ -1066,13 +1870,13 @@ function CoachActions({ section }: { section: MemoSection }) {
       />
       {coachError ? (
         <div className="coach-output coach-output-error mt-4" role="alert">
-          <p className="eyebrow">GPT Coach error</p>
+          <p className="eyebrow">Coach P error</p>
           <pre>{coachError}</pre>
         </div>
       ) : null}
       {coachResult ? (
         <div className="coach-output mt-4" role="status" aria-live="polite">
-          <p className="eyebrow">GPT Coach response</p>
+          <p className="eyebrow">Coach P response</p>
           <pre>{coachResult}</pre>
         </div>
       ) : null}

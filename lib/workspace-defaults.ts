@@ -1,4 +1,4 @@
-export type Role = "Business Team" | "Enablement" | "Approver";
+export type Role = "Business Team" | "Enablement" | "Approver" | "General Reader";
 export type Mode = "Section" | "Full Memo";
 export type SectionStatus = "Draft" | "Review" | "Approved";
 export type QuestionStatus = "Open" | "Answered" | "Resolved" | "Reopened" | "No Change Needed";
@@ -11,6 +11,64 @@ export type IssueType =
   | "Approval Concern";
 export type EnablementFunction = "HR" | "Legal" | "IT" | "Finance & Accounting" | "Tax" | "Marketing" | "CLS" | "Other";
 export type Visibility = "Public" | "Draft" | "Private";
+export type InvestmentRequestStatus = "Draft" | "Submitted";
+export type InvestmentRequestType = "Payroll / Headcount" | "Non-Payroll";
+
+export type InvestmentWorkbookProfile = {
+  planId: string;
+  workbookName: string;
+  templatePath: string;
+  businessUnit: string;
+  payrollInputRange: string;
+  nonPayrollInputRange: string;
+  groups: string[];
+  expenseTypes: string[];
+};
+
+export type InvestmentRequestLine = {
+  id: string;
+  lineType: InvestmentRequestType;
+  jobTitle: string;
+  group: string;
+  roleHire: string;
+  location: string;
+  responsibilities: string;
+  hireDate: string;
+  expenseDescription: string;
+  expenseType: string;
+  vendor: string;
+  annualizedSpend: number | null;
+  notesRationale: string;
+};
+
+export type InvestmentRequest = {
+  id: string;
+  planId: string;
+  requestType: InvestmentRequestType;
+  status: InvestmentRequestStatus;
+  ownerName: string;
+  ownerEmail: string;
+  initiative: string;
+  strategicObjective: string;
+  milestone: string;
+  alternatives: string;
+  measurableOutcome: string;
+  notApprovedImpact: string;
+  createdAt: number;
+  updatedAt: number;
+  submittedAt: number | null;
+  lines: InvestmentRequestLine[];
+};
+
+export type InvestmentRequestExport = {
+  requestId: string;
+  workbookName: string;
+  targetSheet: string;
+  payrollRange: string;
+  nonPayrollRange: string;
+  payrollTsv: string;
+  nonPayrollTsv: string;
+};
 
 export type MemoSection = {
   id: string;
@@ -44,15 +102,43 @@ export type Approver = {
   posture: string;
 };
 
+export type ActivityEvent = {
+  id: string;
+  actorEmail: string;
+  actorRole: Role;
+  objectType: string;
+  objectId: string;
+  action: string;
+  oldValue: string;
+  newValue: string;
+  createdAt: number;
+};
+
+export type CollaborativeGroup = {
+  id: string;
+  groupType: "Enablement" | "Advisor";
+  name: string;
+  description: string;
+};
+
+export type WorkspaceUser = {
+  email: string;
+  displayName: string;
+  role: Role;
+};
+
 export type WorkspacePlan = {
   id: string;
   title: string;
   teamName: string;
   approvalState: SectionStatus;
   approvalPosture: string;
+  user: WorkspaceUser;
   sections: MemoSection[];
   questions: Question[];
   approvers: Approver[];
+  groups: CollaborativeGroup[];
+  activity: ActivityEvent[];
 };
 
 export const PLAN_ID = "2027-business-plan";
@@ -186,3 +272,121 @@ export const approverDefaults = [
   { name: "Dan Letter", title: "Approver", posture: "Questions" },
   { name: "Tim Arndt", title: "Approver", posture: "Questions" },
 ];
+
+export const investmentExpenseTypes = [
+  "Professional Fees",
+  "Occupancy",
+  "Office Expenses",
+  "IT Costs",
+  "Marketing and Presentation",
+  "Travel and Entertainment",
+  "Employee events",
+  "Insurance Non Property",
+  "Licenses",
+  "Recruiting and Relocation",
+  "Seminars and Training",
+  "Shareholder Relations",
+  "Trustees and Director Fees",
+  "Dues and Subscriptions",
+  "Property Management Fee",
+  "Maintenance",
+  "Bank Service Charges",
+  "Other",
+  "Charitable Contributions",
+  "Disputed Charges",
+  "Allocated IT & Office Contra",
+  "Essentials Bonus",
+  "Contract Labor",
+] as const;
+
+export const investmentWorkbookProfiles: Record<string, InvestmentWorkbookProfile> = {
+  [PLAN_ID]: {
+    planId: PLAN_ID,
+    workbookName: "G&A 2027 Plan - Essentials - Final.xlsx",
+    templatePath: "/templates/G&A%202027%20Plan%20-%20Essentials%20Operations%20-%20Final.xlsx",
+    businessUnit: "Essentials",
+    payrollInputRange: "Investment Case Asks - Monthly!A5:H20 and BB5:BB20",
+    nonPayrollInputRange: "Investment Case Asks - Monthly!A28:D42 and AR28:AR42",
+    groups: [],
+    expenseTypes: [...investmentExpenseTypes],
+  },
+  "2027-prologis-energy-solutions-business-plan": {
+    planId: "2027-prologis-energy-solutions-business-plan",
+    workbookName: "G&A 2027 Plan - Energy Solutions - Final.xlsx",
+    templatePath: "/templates/G&A%202027%20Plan%20-%20Energy%20Solutions%20-%20Final.xlsx",
+    businessUnit: "Energy Solutions",
+    payrollInputRange: "Investment Case Asks - Monthly!A5:I20 and BC5:BC20",
+    nonPayrollInputRange: "Investment Case Asks - Monthly!A28:E42 and AS28:AS42",
+    groups: ["Energy", "Mobility", "Energy Finance", "ES Leadership"],
+    expenseTypes: [...investmentExpenseTypes],
+  },
+  "2027-data-center-business-plan": {
+    planId: "2027-data-center-business-plan",
+    workbookName: "G&A 2027 Plan - Data Centers - Final.xlsx",
+    templatePath: "/templates/G&A%202027%20Plan%20-%20Data%20Centers%20-%20Final.xlsx",
+    businessUnit: "Data Centers",
+    payrollInputRange: "Investment Case Asks - Monthly!A5:H20 and BB5:BB20",
+    nonPayrollInputRange: "Investment Case Asks - Monthly!A28:D42 and AR28:AR42",
+    groups: [],
+    expenseTypes: [...investmentExpenseTypes],
+  },
+  "2027-strategic-capital-business-plan": {
+    planId: "2027-strategic-capital-business-plan",
+    workbookName: "G&A 2027 Plan - Strategic Capital - Final.xlsx",
+    templatePath: "/templates/G&A%202027%20Plan%20-%20Strategic%20Capital%20-%20Final.xlsx",
+    businessUnit: "Strategic Capital",
+    payrollInputRange: "Investment Case Asks - Monthly!A5:I20 and BC5:BC20",
+    nonPayrollInputRange: "Investment Case Asks - Monthly!A28:E42 and AS28:AS42",
+    groups: ["Fund Management", "Global Strategy and Analytics", "Client Relations", "Strategic Capital Leadership"],
+    expenseTypes: [...investmentExpenseTypes],
+  },
+};
+
+export const investmentCaseQuestions = [
+  {
+    key: "strategicObjective",
+    question: "What strategic objective or growth opportunity does this investment enable?",
+    guidance:
+      "Identify the business objective, strategic initiative, or growth opportunity this investment supports, and how it aligns with the 2027-2029 business plan.",
+  },
+  {
+    key: "milestone",
+    question: "What business milestone should trigger this investment?",
+    guidance:
+      "Describe why the investment is needed now, or identify the business milestone that would warrant the investment in the future.",
+  },
+  {
+    key: "alternatives",
+    question: "What alternatives were considered?",
+    guidance:
+      "Include process improvements, AI/automation, technology solutions, third-party providers, or redeployment of existing resources.",
+  },
+  {
+    key: "measurableOutcome",
+    question: "What measurable business outcome will this investment deliver?",
+    guidance:
+      "Tie the request to measurable growth or scale, such as revenue, AUM, MW deployed, customers served, sites, projects, savings, or risk reduction.",
+  },
+  {
+    key: "notApprovedImpact",
+    question: "What is the impact if this investment is not approved?",
+    guidance:
+      "Describe implications for growth, strategic initiatives, customer commitments, operations, financial results, or risk management.",
+  },
+] as const;
+
+export const emptyInvestmentRequestLine: InvestmentRequestLine = {
+  id: "",
+  lineType: "Payroll / Headcount",
+  jobTitle: "",
+  group: "",
+  roleHire: "",
+  location: "",
+  responsibilities: "",
+  hireDate: "",
+  expenseDescription: "",
+  expenseType: "",
+  vendor: "",
+  annualizedSpend: null,
+  notesRationale: "",
+};

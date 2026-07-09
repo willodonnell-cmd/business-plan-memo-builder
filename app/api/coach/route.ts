@@ -1,3 +1,6 @@
+import { getOpenAIRuntimeConfig } from "../../../lib/openai-runtime";
+import { extractOpenAIText } from "../../../lib/openai-response";
+
 type CoachRequest = {
   action?: string;
   sectionTitle?: string;
@@ -11,14 +14,14 @@ type CoachRequest = {
 
 type OpenAIResponse = {
   output_text?: string;
+  output?: Array<{ content?: Array<{ text?: string }> }>;
   error?: { message?: string };
 };
 
 export async function POST(request: Request) {
   try {
-    const apiKey = process.env.OPENAI_API_KEY;
-    const model = process.env.OPENAI_MODEL || "gpt-5.4-mini";
-    if (!apiKey) {
+    const openai = getOpenAIRuntimeConfig();
+    if (!openai) {
       return Response.json({ error: "GPT Coach is not configured. OPENAI_API_KEY is missing." }, { status: 503 });
     }
 
@@ -55,11 +58,11 @@ export async function POST(request: Request) {
     const response = await fetch("https://api.openai.com/v1/responses", {
       method: "POST",
       headers: {
-        authorization: `Bearer ${apiKey}`,
+        authorization: `Bearer ${openai.apiKey}`,
         "content-type": "application/json",
       },
       body: JSON.stringify({
-        model,
+        model: openai.model,
         input: [
           {
             role: "system",
@@ -79,7 +82,7 @@ export async function POST(request: Request) {
       return Response.json({ error: payload.error?.message ?? "GPT Coach request failed." }, { status: response.status });
     }
 
-    return Response.json({ result: payload.output_text ?? "No coach response was returned." });
+    return Response.json({ result: extractOpenAIText(payload) || "No coach response was returned." });
   } catch (error) {
     return Response.json({ error: error instanceof Error ? error.message : "GPT Coach request failed." }, { status: 500 });
   }

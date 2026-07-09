@@ -1,14 +1,14 @@
-import { createApprover, getWorkspacePlan, toRouteErrorMessage } from "../../../lib/workspace-store";
+import { createApprover, getActorFromRequest, getWorkspacePlan, toRouteErrorMessage } from "../../../lib/workspace-store";
 
 export async function POST(request: Request) {
   try {
+    const actor = await getActorFromRequest(request);
     const input = await request.json();
-    await createApprover({
-      ...input,
-      requesterEmail: request.headers.get("oai-authenticated-user-email") ?? input.requesterEmail,
-    });
-    return Response.json({ plan: await getWorkspacePlan(input.planId) }, { status: 201 });
+    await createApprover(input, actor);
+    return Response.json({ plan: await getWorkspacePlan(input.planId, actor) }, { status: 201 });
   } catch (error) {
-    return Response.json({ error: toRouteErrorMessage(error) }, { status: 500 });
+    const message = toRouteErrorMessage(error);
+    const status = message.includes("authorized") ? 403 : message.includes("required") ? 400 : 500;
+    return Response.json({ error: message }, { status });
   }
 }

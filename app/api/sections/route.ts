@@ -1,10 +1,10 @@
-import { createQuestion, getActorFromRequest, getWorkspacePlan, toRouteErrorMessage } from "../../../lib/workspace-store";
+import { createSection, getActorFromRequest, getWorkspacePlan, toRouteErrorMessage } from "../../../lib/workspace-store";
 
 export async function POST(request: Request) {
   try {
     const actor = await getActorFromRequest(request);
     const input = await request.json();
-    await createQuestion(input, actor);
+    await createSection(input, actor);
     return Response.json({ plan: await getWorkspacePlan(input.planId, actor) }, { status: 201 });
   } catch (error) {
     const message = toRouteErrorMessage(error);

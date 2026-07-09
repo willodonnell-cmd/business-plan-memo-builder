@@ -70,3 +70,74 @@ export const approvers = sqliteTable("approvers", {
   posture: text("posture").notNull().default("Reviewing"),
   updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
 });
+
+export const userProfiles = sqliteTable("user_profiles", {
+  email: text("email").primaryKey(),
+  displayName: text("display_name"),
+  role: text("role", { enum: ["Business Team", "Enablement", "Approver", "General Reader"] })
+    .notNull()
+    .default("General Reader"),
+  createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+  updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+});
+
+export const collaborativeGroups = sqliteTable("collaborative_groups", {
+  id: text("id").primaryKey(),
+  planId: text("plan_id")
+    .notNull()
+    .references(() => businessPlans.id, { onDelete: "cascade" }),
+  groupType: text("group_type", { enum: ["Enablement", "Advisor"] }).notNull(),
+  name: text("name").notNull(),
+  description: text("description").notNull().default(""),
+  createdBy: text("created_by").notNull(),
+  createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+  updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+});
+
+export const activityEvents = sqliteTable("activity_events", {
+  id: text("id").primaryKey(),
+  planId: text("plan_id")
+    .notNull()
+    .references(() => businessPlans.id, { onDelete: "cascade" }),
+  actorEmail: text("actor_email").notNull(),
+  actorRole: text("actor_role", { enum: ["Business Team", "Enablement", "Approver", "General Reader"] }).notNull(),
+  objectType: text("object_type").notNull(),
+  objectId: text("object_id").notNull(),
+  action: text("action").notNull(),
+  oldValue: text("old_value"),
+  newValue: text("new_value"),
+  createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+});
+
+export const investmentRequests = sqliteTable("investment_requests", {
+  id: text("id").primaryKey(),
+  planId: text("plan_id")
+    .notNull()
+    .references(() => businessPlans.id, { onDelete: "cascade" }),
+  requestType: text("request_type", { enum: ["Payroll / Headcount", "Non-Payroll"] }).notNull(),
+  status: text("status", { enum: ["Draft", "Submitted"] }).notNull().default("Draft"),
+  ownerName: text("owner_name").notNull().default(""),
+  ownerEmail: text("owner_email").notNull().default(""),
+  initiative: text("initiative").notNull().default(""),
+  strategicObjective: text("strategic_objective").notNull().default(""),
+  milestone: text("milestone").notNull().default(""),
+  alternatives: text("alternatives").notNull().default(""),
+  measurableOutcome: text("measurable_outcome").notNull().default(""),
+  notApprovedImpact: text("not_approved_impact").notNull().default(""),
+  createdBy: text("created_by").notNull(),
+  createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+  updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+  submittedAt: integer("submitted_at", { mode: "timestamp_ms" }),
+});
+
+export const investmentRequestLines = sqliteTable("investment_request_lines", {
+  id: text("id").primaryKey(),
+  requestId: text("request_id")
+    .notNull()
+    .references(() => investmentRequests.id, { onDelete: "cascade" }),
+  lineType: text("line_type", { enum: ["Payroll / Headcount", "Non-Payroll"] }).notNull(),
+  position: integer("position").notNull(),
+  lineData: text("line_data", { mode: "json" }).notNull(),
+  createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+  updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+});
