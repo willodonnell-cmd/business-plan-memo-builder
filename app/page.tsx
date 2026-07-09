@@ -1,92 +1,156 @@
 "use client";
 
-import { useEffect, useMemo, useState, type Dispatch, type ReactNode, type SetStateAction } from "react";
-import type { Approver, MemoSection, Mode, Question, QuestionStatus, Role, SectionStatus, WorkspacePlan } from "../lib/workspace-defaults";
+import { useCallback, useEffect, useMemo, useState, type Dispatch, type ReactNode, type SetStateAction } from "react";
+import {
+  businessPlanWorkstreams,
+  emptyInvestmentRequestLine,
+  investmentCaseQuestions,
+  investmentWorkbookProfiles,
+} from "../lib/workspace-defaults";
+import type {
+  Approver,
+  EnablementFunction,
+  InvestmentRequest,
+  InvestmentRequestExport,
+  InvestmentRequestLine,
+  InvestmentRequestType,
+  InvestmentWorkbookProfile,
+  IssueType,
+  MemoSection,
+  Mode,
+  Question,
+  QuestionStatus,
+  Role,
+  SectionStatus,
+  Visibility,
+  WorkspacePlan,
+} from "../lib/workspace-defaults";
 
 type ApiPlanResponse = {
   plan?: WorkspacePlan;
   error?: string;
 };
 
-type SaveState = "idle" | "saving" | "saved" | "error";
-type WorkspaceRole = Role | "General";
+type ApiInvestmentResponse = {
+  request?: InvestmentRequest;
+  requests?: InvestmentRequest[];
+  export?: InvestmentRequestExport;
+  error?: string;
+};
 
-const roles: WorkspaceRole[] = ["Business Team", "Enablement", "Approver", "General"];
-const roleStorageKey = "business-plan-workspace-role";
-const approverAllowlist = ["dletter@prologis.com", "tarndt@prologis.com", "wodonnell@prologis.com"];
-const BUSINESS_PLAN_OPTIONS = [
-  "Essentials",
-  "Prologis Energy Solutions",
-  "Data Center",
-  "Strategic Capital",
-  "Ventures",
-] as const;
-const sectionReadinessStatuses: SectionStatus[] = ["Draft", "Review"];
-const questionStatuses: QuestionStatus[] = ["Open", "Answered", "Resolved", "Reopened", "No Change Needed"];
+type SaveState = "idle" | "saving" | "saved" | "error";
+type WorkspaceModule = "Memo" | "Investment Requests";
+
+const roles: Role[] = ["Business Team", "Enablement", "Approver", "General Reader"];
+const enablementFunctions: EnablementFunction[] = ["HR", "Legal", "IT", "Finance & Accounting", "Tax", "Marketing", "CLS", "Other"];
 const approverPostures = ["Questions", "Approved"];
 const emptySections: MemoSection[] = [];
 const emptyQuestions: Question[] = [];
 const emptyApprovers: Approver[] = [];
-const currentUserName = "Will O'Donnell";
-const currentUserEmail = "wodonnell@prologis.com";
-const adminEmail = "wodonnell@prologis.com";
-const approverEmailByName: Record<string, string> = {
-  "Dan Letter": "dletter@prologis.com",
-  "Tim Arndt": "tarndt@prologis.com",
-  "Will O'Donnell": "wodonnell@prologis.com",
-};
+const defaultPlanId = businessPlanWorkstreams[0].id;
 
-function normalizeApproverPosture(posture: string) {
-  return posture === "Approved" ? "Approved" : "Questions";
+function workspaceModuleLabel(module: WorkspaceModule) {
+  return module === "Investment Requests" ? "G&A Engine" : module;
+}
+
+function isOpenQuestionStatus(status: QuestionStatus) {
+  return status === "Open" || status === "Reopened";
+}
+
+function allowedQuestionStatusesForRole(role: Role) {
+  if (role === "Business Team") {
+    return ["Open", "Answered", "Resolved", "No Change Needed"] as QuestionStatus[];
+  }
+  return ["Open", "Reopened", "Resolved"] as QuestionStatus[];
+}
+
+function questionStatusOptions(role: Role, currentStatus: QuestionStatus) {
+  const options = allowedQuestionStatusesForRole(role);
+  return options.includes(currentStatus) ? options : [currentStatus, ...options];
+}
+
+function sectionIsVisibleToRole(section: MemoSection, role: Role) {
+  if (role === "Business Team") return true;
+  if (role === "Enablement") return section.status === "Review" || section.status === "Approved";
+  return section.status === "Approved";
+}
+
+function sectionStatusLabel(status: SectionStatus) {
+  if (status === "Review") return "For Review";
+  if (status === "Approved") return "For Approval";
+  return "Draft";
 }
 
 export default function Home() {
-  const initialRole = getStoredRole();
   const [plan, setPlan] = useState<WorkspacePlan | null>(null);
-  const [role, setRole] = useState<WorkspaceRole | null>(initialRole);
-  const [mode, setMode] = useState<Mode>(initialRole && initialRole !== "Business Team" ? "Full Memo" : "Section");
+  const [activePlanId, setActivePlanId] = useState<string>(defaultPlanId);
+  const [role, setRole] = useState<Role>("Business Team");
+  const [mode, setMode] = useState<Mode>("Section");
+  const [workspaceModule, setWorkspaceModule] = useState<WorkspaceModule>("Memo");
   const [activeId, setActiveId] = useState("");
-  const [teamName, setTeamName] = useState("");
+  const [investmentRequests, setInvestmentRequests] = useState<InvestmentRequest[]>([]);
+  const [activeInvestmentId, setActiveInvestmentId] = useState("");
+  const [investmentSearch, setInvestmentSearch] = useState("");
+  const [investmentExport, setInvestmentExport] = useState<InvestmentRequestExport | null>(null);
+  const [investmentError, setInvestmentError] = useState("");
   const [showGuidance, setShowGuidance] = useState(true);
   const [showCoach, setShowCoach] = useState(false);
-  const [showHowTo, setShowHowTo] = useState(false);
+  const [showHelp, setShowHelp] = useState(false);
   const [questionsOpen, setQuestionsOpen] = useState(false);
-  const [approvalOpen, setApprovalOpen] = useState(false);
   const [questionDraft, setQuestionDraft] = useState("");
-  const [questionVisibility, setQuestionVisibility] = useState<"Public" | "Private" | "Draft">("Public");
-  const [questionSectionId, setQuestionSectionId] = useState("");
+  const [isAddingQuestion, setIsAddingQuestion] = useState(false);
+  const [visibility, setVisibility] = useState<Visibility>("Public");
+  const [issueType, setIssueType] = useState<IssueType>("Clarification");
+  const [enablementFunction, setEnablementFunction] = useState<EnablementFunction>("Legal");
   const [responseDrafts, setResponseDrafts] = useState<Record<string, string>>({});
-  const [approverDrafts, setApproverDrafts] = useState<Record<string, string>>({});
-  const [newApproverName, setNewApproverName] = useState("");
-  const [newApproverTitle, setNewApproverTitle] = useState("");
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const [message, setMessage] = useState("Loading workspace...");
+  const [showSavedToast, setShowSavedToast] = useState(false);
 
   const sections = plan?.sections ?? emptySections;
   const questions = plan?.questions ?? emptyQuestions;
   const approvers = plan?.approvers ?? emptyApprovers;
-  const canManageApprovers = currentUserEmail === adminEmail;
-  const canEditPlan = role === "Business Team";
-  const canAskQuestions = role === "Business Team" || role === "Enablement" || role === "Approver";
-  const activeSection = sections.find((section) => section.id === activeId) ?? sections[0] ?? null;
+  const currentUser = plan?.user ?? null;
+  const canEditMemo = currentUser?.role === "Business Team";
+  const canParticipate = Boolean(currentUser && currentUser.role !== "General Reader");
+  const canSetApproval = currentUser?.role === "Business Team" || currentUser?.role === "Approver";
+  const visibleSections = useMemo(
+    () => sections.filter((section) => sectionIsVisibleToRole(section, role)),
+    [sections, role],
+  );
+  const activeSection = visibleSections.find((section) => section.id === activeId) ?? visibleSections[0] ?? null;
   const planTitle = plan?.title ?? "2027 Essentials Business Plan";
-  const openQuestions = questions.filter((question) => question.status !== "Resolved").length;
+  const openQuestions = questions.filter((question) => isOpenQuestionStatus(question.status)).length;
   const approvedCount = approvers.filter((approver) => approver.posture === "Approved").length;
-  const normalizedCurrentUserEmail = currentUserEmail.toLowerCase();
-  const visibleApprovers =
-    canManageApprovers || role !== "Approver"
-      ? approvers
-      : approvers.filter((approver) => approverEmailByName[approver.name]?.toLowerCase() === normalizedCurrentUserEmail);
-  const inReviewCount = sections.filter((section) => section.status !== "Draft").length;
-  const approvalConcerns = questions.filter(
-    (question) => question.status !== "Resolved" && question.issueType === "Approval Concern",
+  const memoWorkflowStatus =
+    approvers.length > 0 && approvedCount === approvers.length
+      ? "Approved"
+      : sections.some((section) => section.status === "Approved")
+        ? "Approval process"
+        : sections.some((section) => section.status === "Review")
+          ? "Review"
+          : "Drafting";
+  const sectionIndex = activeSection ? sections.findIndex((section) => section.id === activeSection.id) + 1 : 1;
+  const inReviewCount = sections.filter((section) => section.status === "Review" || section.status === "Approved").length;
+  const inApprovalCount = sections.filter((section) => section.status === "Approved").length;
+  const openDependencies = questions.filter(
+    (question) =>
+      isOpenQuestionStatus(question.status) &&
+      ["Functional Dependency", "Support Need", "Required Input"].includes(question.issueType),
   ).length;
+  const currentApprover = approvers[0] ?? null;
+  const currentApproverMode = currentApprover?.posture === "Approved" ? "Approved" : "Questions";
+  const selectedBusinessPlan = businessPlanWorkstreams.some((workstream) => workstream.id === activePlanId)
+    ? activePlanId
+    : defaultPlanId;
+  const activeInvestmentRequest =
+    investmentRequests.find((request) => request.id === activeInvestmentId) ?? investmentRequests[0] ?? null;
+  const workbookProfile = investmentWorkbookProfiles[selectedBusinessPlan] ?? null;
 
   const visibleQuestions = useMemo(() => {
     if (!activeSection) return [];
     return questions.filter((question) => {
       if (question.sectionId !== activeSection.id) return false;
-      if (role === "General") return question.visibility === "Public";
       if (role === "Business Team") return question.visibility !== "Draft" || question.role === role;
       if (question.visibility === "Public") return true;
       return question.role === role;
@@ -94,16 +158,14 @@ export default function Home() {
   }, [activeSection, questions, role]);
 
   const allVisibleQuestions = useMemo(() => {
+    const visibleSectionIds = new Set(visibleSections.map((section) => section.id));
     return questions.filter((question) => {
-      if (role === "General") return question.visibility === "Public";
+      if (!visibleSectionIds.has(question.sectionId)) return false;
       if (role === "Business Team") return question.visibility !== "Draft" || question.role === role;
       if (question.visibility === "Public") return true;
       return question.role === role;
     });
-  }, [questions, role]);
-
-  const questionTargetSection =
-    (mode === "Full Memo" ? sections.find((section) => section.id === questionSectionId) : activeSection) ?? activeSection ?? null;
+  }, [questions, role, visibleSections]);
 
   async function requestPlan(path: string, init?: RequestInit) {
     setSaveState("saving");
@@ -124,114 +186,206 @@ export default function Home() {
     return payload.plan;
   }
 
+  const requestInvestments = useCallback(async (path: string, init?: RequestInit) => {
+    setSaveState("saving");
+    setMessage(init ? "Saving G&A Engine request..." : "Loading G&A Engine requests...");
+    const response = await fetch(path, {
+      ...init,
+      headers: {
+        "content-type": "application/json",
+        ...(init?.headers ?? {}),
+      },
+    });
+    const payload = (await response.json()) as ApiInvestmentResponse;
+    if (!response.ok) {
+      setSaveState("error");
+      setInvestmentError(payload.error ?? "Investment request failed.");
+      setMessage(payload.error ?? "Investment request failed.");
+      throw new Error(payload.error ?? "Investment request failed.");
+    }
+    if (payload.requests) {
+      setInvestmentRequests(payload.requests);
+      setActiveInvestmentId((current) =>
+        payload.requests?.some((request) => request.id === current) ? current : payload.requests?.[0]?.id ?? "",
+      );
+    }
+    if (payload.request) {
+      setActiveInvestmentId(payload.request.id);
+    }
+    if (payload.export) {
+      setInvestmentExport(payload.export);
+    }
+    setInvestmentError("");
+    setSaveState("saved");
+    setMessage("Saved");
+    return payload;
+  }, []);
+
   function applyPlan(nextPlan: WorkspacePlan, nextMessage: string) {
     setPlan(nextPlan);
-    setTeamName(nextPlan.teamName);
-    setActiveId((current) => current || nextPlan.sections[0]?.id || "");
-    setQuestionSectionId((current) => current || nextPlan.sections[0]?.id || "");
-    setResponseDrafts(Object.fromEntries(nextPlan.questions.map((question) => [question.id, question.response])));
-    setApproverDrafts(
-      Object.fromEntries(nextPlan.approvers.map((approver) => [approver.id, normalizeApproverPosture(approver.posture)])),
+    setActivePlanId(nextPlan.id);
+    setActiveId((current) =>
+      nextPlan.sections.some((section) => section.id === current) ? current : nextPlan.sections[0]?.id || "",
     );
+    setResponseDrafts(Object.fromEntries(nextPlan.questions.map((question) => [question.id, question.response])));
     setSaveState("saved");
     setMessage(nextMessage);
-  }
-
-  async function savePlan(patch: Partial<Pick<WorkspacePlan, "teamName" | "approvalState" | "approvalPosture">>) {
-    const nextPlan = await requestPlan("/api/plan", {
-      method: "PATCH",
-      body: JSON.stringify(patch),
-    });
-    applyPlan(nextPlan, "Saved");
+    if (nextMessage !== "Loaded") {
+      setShowSavedToast(true);
+    }
   }
 
   async function saveSection(section: MemoSection, patch: Partial<Pick<MemoSection, "content" | "status">>) {
     const nextPlan = await requestPlan(`/api/sections/${encodeURIComponent(section.id)}`, {
       method: "PATCH",
-      body: JSON.stringify(patch),
+      body: JSON.stringify({ ...patch, planId: activePlanId }),
     });
     applyPlan(nextPlan, "Saved");
   }
 
   async function addQuestion() {
-    if (!questionTargetSection || !questionDraft.trim() || !role || role === "General") return;
-    const questionRole = role;
-    const nextPlan = await requestPlan("/api/questions", {
-      method: "POST",
-      body: JSON.stringify({
-        sectionId: questionTargetSection.id,
-        author: currentUserName,
-        authorEmail: currentUserEmail,
-        role: questionRole,
-        visibility: questionVisibility,
-        issueType: questionRole === "Approver" ? "Approval Concern" : "Clarification",
-        functionName: "",
-        body: questionDraft.trim(),
-      }),
-    });
-    setQuestionDraft("");
-    setQuestionVisibility("Public");
-    setQuestionsOpen(true);
-    applyPlan(nextPlan, "Question added");
+    const body = questionDraft.trim();
+    if (!activeSection || !body || isAddingQuestion || !canParticipate) return;
+    setIsAddingQuestion(true);
+    try {
+      const nextPlan = await requestPlan("/api/questions", {
+        method: "POST",
+        body: JSON.stringify({
+          planId: activePlanId,
+          sectionId: activeSection.id,
+          visibility,
+          issueType: role === "Approver" ? "Approval Concern" : role === "Enablement" ? "Support Need" : issueType,
+          functionName: role === "Enablement" ? enablementFunction : "",
+          body,
+        }),
+      });
+      setQuestionDraft("");
+      setQuestionsOpen(true);
+      applyPlan(nextPlan, "Question added");
+    } finally {
+      setIsAddingQuestion(false);
+    }
   }
 
   async function saveQuestion(question: Question, patch: Partial<Pick<Question, "status" | "response">>) {
     const nextPlan = await requestPlan(`/api/questions/${encodeURIComponent(question.id)}`, {
       method: "PATCH",
-      body: JSON.stringify(patch),
+      body: JSON.stringify({ ...patch, planId: activePlanId }),
     });
     applyPlan(nextPlan, "Question saved");
   }
 
   async function removeQuestion(question: Question) {
     const nextPlan = await requestPlan(
-      `/api/questions/${encodeURIComponent(question.id)}?role=${encodeURIComponent(role)}`,
+      `/api/questions/${encodeURIComponent(question.id)}?planId=${encodeURIComponent(activePlanId)}`,
       { method: "DELETE" },
     );
     applyPlan(nextPlan, "Question deleted");
   }
 
-  async function saveApprover(approver: Approver) {
-    const posture = normalizeApproverPosture(approverDrafts[approver.id] ?? approver.posture);
-    const nextPlan = await requestPlan(`/api/approvers/${encodeURIComponent(approver.id)}`, {
-      method: "PATCH",
-      body: JSON.stringify({ posture }),
-    });
-    applyPlan(nextPlan, "Approval saved");
+  async function changePlanSelection(nextPlanId: string) {
+    setActivePlanId(nextPlanId);
+    setActiveId("");
+    setActiveInvestmentId("");
+    setInvestmentExport(null);
+    const nextPlan = await requestPlan(`/api/plan?planId=${encodeURIComponent(nextPlanId)}`);
+    applyPlan(nextPlan, "Loaded");
+    const query = new URLSearchParams({ planId: nextPlanId });
+    if (investmentSearch.trim()) query.set("q", investmentSearch.trim());
+    await requestInvestments(`/api/investment-requests?${query.toString()}`);
   }
 
-  async function addApprover() {
-    if (!newApproverName.trim()) return;
-    const nextPlan = await requestPlan("/api/approvers", {
-      method: "POST",
-      body: JSON.stringify({
-        name: newApproverName.trim(),
-        title: newApproverTitle.trim() || "Approver",
-        posture: "Questions",
-        requesterEmail: currentUserEmail,
-      }),
-    });
-    setNewApproverName("");
-    setNewApproverTitle("");
-    applyPlan(nextPlan, "Approver added");
+  async function createInvestmentRequest(requestType: InvestmentRequestType) {
+    try {
+      const payload = await requestInvestments("/api/investment-requests", {
+        method: "POST",
+        body: JSON.stringify({ planId: activePlanId, requestType }),
+      });
+      setInvestmentExport(null);
+      if (payload.request) setActiveInvestmentId(payload.request.id);
+    } catch {
+      return;
+    }
   }
 
-  async function changePlanSelection(nextTeamName: string) {
-    setTeamName(nextTeamName);
-    const nextPlan = await requestPlan("/api/plan", {
-      method: "PATCH",
-      body: JSON.stringify({ teamName: nextTeamName }),
-    });
-    applyPlan(nextPlan, "Saved");
+  async function saveInvestmentRequest(request: InvestmentRequest, submit = false) {
+    try {
+      const payload = await requestInvestments(`/api/investment-requests/${encodeURIComponent(request.id)}`, {
+        method: "PATCH",
+        body: JSON.stringify({ ...request, planId: activePlanId, submit }),
+      });
+      setInvestmentExport(null);
+      if (payload.request) setActiveInvestmentId(payload.request.id);
+      setShowSavedToast(true);
+    } catch {
+      return;
+    }
   }
 
-  async function updateApproverPosture(approver: Approver, posture: string) {
-    updateApproverDraft(approver.id, posture);
-    const nextPlan = await requestPlan(`/api/approvers/${encodeURIComponent(approver.id)}`, {
+  async function loadInvestmentExport(request: InvestmentRequest) {
+    try {
+      const query = new URLSearchParams({ planId: activePlanId });
+      await requestInvestments(`/api/investment-requests/${encodeURIComponent(request.id)}/export?${query.toString()}`);
+    } catch {
+      return;
+    }
+  }
+
+  async function downloadInvestmentWorkbook(request: InvestmentRequest) {
+    setSaveState("saving");
+    setMessage("Generating workbook...");
+    setInvestmentError("");
+    try {
+      const query = new URLSearchParams({ planId: activePlanId, format: "xlsx" });
+      const response = await fetch(`/api/investment-requests/${encodeURIComponent(request.id)}/export?${query.toString()}`);
+      if (!response.ok) {
+        const payload = (await response.json().catch(() => ({}))) as { error?: string };
+        throw new Error(payload.error ?? "Workbook export failed.");
+      }
+      const blob = await response.blob();
+      const disposition = response.headers.get("content-disposition") ?? "";
+      const fileName = disposition.match(/filename="([^"]+)"/)?.[1] ?? "investment-request-export.xlsx";
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = fileName;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+      setSaveState("saved");
+      setMessage("Workbook generated");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Workbook export failed.";
+      setSaveState("error");
+      setMessage(message);
+      setInvestmentError(message);
+    }
+  }
+
+  async function deleteInvestmentRequest(request: InvestmentRequest) {
+    try {
+      const query = new URLSearchParams({ planId: activePlanId });
+      const payload = await requestInvestments(`/api/investment-requests/${encodeURIComponent(request.id)}?${query.toString()}`, {
+        method: "DELETE",
+      });
+      setInvestmentExport(null);
+      setActiveInvestmentId((current) => (current === request.id ? payload.requests?.[0]?.id ?? "" : current));
+      setShowSavedToast(true);
+    } catch {
+      return;
+    }
+  }
+
+  async function changeApproverMode(value: string) {
+    if (!currentApprover) return;
+    if (!canSetApproval) return;
+    const posture = value === "Approved" ? "Approved" : "Questions";
+    const nextPlan = await requestPlan(`/api/approvers/${encodeURIComponent(currentApprover.id)}`, {
       method: "PATCH",
-      body: JSON.stringify({ posture: normalizeApproverPosture(posture) }),
+      body: JSON.stringify({ planId: activePlanId, posture }),
     });
-    applyPlan(nextPlan, normalizeApproverPosture(posture) === "Approved" ? "Approval saved" : "Question mode saved");
+    applyPlan(nextPlan, posture === "Approved" ? "Approval saved" : "Question mode saved");
   }
 
   function updateSectionContent(id: string, content: string) {
@@ -247,30 +401,21 @@ export default function Home() {
     );
   }
 
-  function updateApproverDraft(id: string, posture: string) {
-    setApproverDrafts((current) => ({ ...current, [id]: normalizeApproverPosture(posture) }));
-  }
-
   function canDelete(question: Question) {
-    if (role === "General") return false;
-    return role === "Business Team" || question.role === role;
+    if (!currentUser || currentUser.role === "General Reader") return false;
+    return currentUser.role === "Business Team" || question.role === currentUser.role;
   }
 
-  function switchRole(nextRole: WorkspaceRole) {
-    if (nextRole === "Approver" && !approverAllowlist.includes(currentUserEmail.toLowerCase())) {
-      setSaveState("error");
-      setMessage("Approver mode is limited to approved executive reviewers.");
-      return;
-    }
+  function switchRole(nextRole: Role) {
     setRole(nextRole);
-    window.localStorage.setItem(roleStorageKey, nextRole);
-    setSaveState("idle");
     if (nextRole === "Business Team") {
       setMode("Section");
+      setIssueType("Clarification");
       return;
     }
     setMode("Full Memo");
     setQuestionsOpen(nextRole === "Enablement" || nextRole === "Approver");
+    setIssueType(nextRole === "Approver" ? "Approval Concern" : nextRole === "Enablement" ? "Support Need" : "Clarification");
   }
 
   useEffect(() => {
@@ -280,8 +425,11 @@ export default function Home() {
       setSaveState("saving");
       setMessage("Loading...");
       try {
-        const nextPlan = await requestPlan("/api/plan");
-        if (!cancelled) applyPlan(nextPlan, "Loaded");
+        const nextPlan = await requestPlan(`/api/plan?planId=${encodeURIComponent(defaultPlanId)}`);
+        if (!cancelled) {
+          applyPlan(nextPlan, "Loaded");
+          void requestInvestments(`/api/investment-requests?planId=${encodeURIComponent(defaultPlanId)}`);
+        }
       } catch (error) {
         if (!cancelled) {
           setMessage(error instanceof Error ? error.message : "Could not load workspace.");
@@ -294,9 +442,35 @@ export default function Home() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [requestInvestments]);
 
-  if (!plan || !activeSection) {
+  useEffect(() => {
+    if (!plan) return;
+    const timeout = window.setTimeout(() => {
+      const query = new URLSearchParams({ planId: activePlanId });
+      if (investmentSearch.trim()) query.set("q", investmentSearch.trim());
+      void requestInvestments(`/api/investment-requests?${query.toString()}`);
+    }, 250);
+    return () => window.clearTimeout(timeout);
+  }, [activePlanId, investmentSearch, plan, requestInvestments]);
+
+  useEffect(() => {
+    if (!plan) return;
+    const interval = window.setInterval(() => {
+      void requestPlan(`/api/plan?planId=${encodeURIComponent(activePlanId)}`)
+        .then((nextPlan) => applyPlan(nextPlan, "Loaded"))
+        .catch(() => undefined);
+    }, 15000);
+    return () => window.clearInterval(interval);
+  }, [activePlanId, plan]);
+
+  useEffect(() => {
+    if (!showSavedToast) return;
+    const timeout = window.setTimeout(() => setShowSavedToast(false), 1800);
+    return () => window.clearTimeout(timeout);
+  }, [showSavedToast]);
+
+  if (!plan) {
     return (
       <main className="grid min-h-screen place-items-center bg-[#f7f5ef] px-5 text-[#161712]">
         <div className="card max-w-md p-6">
@@ -308,33 +482,12 @@ export default function Home() {
     );
   }
 
-  if (!role) {
-    return (
-      <main className="grid min-h-screen place-items-center bg-[#f7f5ef] px-5 text-[#161712]">
-        <div className="card max-w-2xl p-6">
-          <p className="eyebrow">Workspace role</p>
-          <h1 className="mt-2 text-2xl font-semibold">Choose your role</h1>
-          <p className="mt-3 text-sm leading-6 text-[#69665c]">Select how you want to enter the 2027 Business Plan Workspace.</p>
-          <div className="role-switcher mt-5" aria-label="Role">
-            {roles.map((item) => (
-              <button key={item} className="role-pill" data-role={item} onClick={() => switchRole(item)}>
-                <span className="role-dot" />
-                {item}
-              </button>
-            ))}
-          </div>
-          {saveState === "error" ? <p className="mt-4 text-sm text-[#8a2f25]">{message}</p> : null}
-        </div>
-      </main>
-    );
-  }
-
   return (
     <main className="min-h-screen bg-[#f7f5ef] text-[#161712]">
       <header className="mx-auto max-w-[1500px] px-4 pt-6 print:hidden sm:px-6">
         <div className="desktop-header flex flex-wrap items-start justify-between gap-5 border-b border-[#d9d5ca] pb-6">
           <div className="flex min-w-0 items-start gap-3">
-            <div className="brand-mark" aria-hidden="true">▤</div>
+            <div className="brand-mark" role="img" aria-label="Prologis" />
             <div className="min-w-0">
               <div className="flex min-w-0 items-center gap-2">
                 <h1 className="site-title truncate font-bold tracking-0">{planTitle}</h1>
@@ -342,13 +495,12 @@ export default function Home() {
               <div className="plan-meta-row">
                 <label className="plan-selector">
                   <span>Business plan view</span>
-                  <select value={teamName} onChange={(event) => void changePlanSelection(event.target.value)}>
-                    {BUSINESS_PLAN_OPTIONS.map((option) => (
-                      <option key={option} value={option}>{option}</option>
+                  <select value={selectedBusinessPlan} onChange={(event) => void changePlanSelection(event.target.value)}>
+                    {businessPlanWorkstreams.map((workstream) => (
+                      <option key={workstream.id} value={workstream.id}>{workstream.label}</option>
                     ))}
                   </select>
                 </label>
-                <p className="site-subtitle text-[#756f64]">Strategic business plan memo workspace</p>
               </div>
             </div>
           </div>
@@ -367,7 +519,6 @@ export default function Home() {
                 </button>
               ))}
             </div>
-            <button className="toolbar-button" onClick={() => setShowHowTo(true)}>ⓘ How to</button>
             <button className="toolbar-button" onClick={() => window.print()}>⇩ Export PDF</button>
           </div>
         </div>
@@ -380,290 +531,326 @@ export default function Home() {
             <p>{roleFocus(role).body}</p>
           </div>
 
-          <div className="segmented">
-            {(["Section", "Full Memo"] as Mode[]).map((item) => (
+          <div className="segmented" aria-label="Workspace module">
+            {(["Memo", "Investment Requests"] as WorkspaceModule[]).map((item) => (
               <button
                 key={item}
-                className={`segmented-button ${mode === item ? "segmented-button-active" : ""}`}
-                onClick={() => setMode(item)}
+                className={`segmented-button ${workspaceModule === item ? "segmented-button-active" : ""}`}
+                onClick={() => setWorkspaceModule(item)}
               >
-                {item === "Full Memo" ? "Full memo" : "Section"}
+                {workspaceModuleLabel(item)}
               </button>
             ))}
           </div>
 
-          <div className="workflow-metrics">
-            <Metric label="Memo approval" value={`${approvedCount}/${approvers.length || 0} approved`} />
-            <Metric label="Questions" value={`${openQuestions} open`} />
-            {saveState !== "idle" ? <span className={`save-state save-state-${saveState}`}>{message}</span> : null}
+          <div className="workflow-controls">
+            {workspaceModule === "Memo" ? (
+              <div className="memo-mode-tools">
+                <div className="segmented" aria-label="Memo mode">
+                  {(["Section", "Full Memo"] as Mode[]).map((item) => (
+                    <button
+                      key={item}
+                      className={`segmented-button ${mode === item ? "segmented-button-active" : ""}`}
+                      onClick={() => setMode(item)}
+                    >
+                      {item === "Full Memo" ? "Full memo" : "Section"}
+                    </button>
+                  ))}
+                </div>
+                <button className="help-icon-button" type="button" aria-label="Help" title="Help" onClick={() => setShowHelp(true)}>
+                  ?
+                </button>
+              </div>
+            ) : null}
+
+            <div className="workflow-metrics">
+              {workspaceModule === "Investment Requests" ? (
+                <>
+                  <Metric label="Requests" value={`${investmentRequests.length} total`} />
+                  <Metric label="Submitted" value={`${investmentRequests.filter((request) => request.status === "Submitted").length} submitted`} />
+                </>
+              ) : (
+                <>
+                  <div className="memo-status-button" aria-label={`Memo status: ${memoWorkflowStatus}`}>
+                    <span>Status:</span>
+                    <strong>{memoWorkflowStatus}</strong>
+                  </div>
+                  <div className="memo-status-button memo-questions-button" aria-label={`Questions: ${openQuestions} open`}>
+                    <span>Questions:</span>
+                    <strong>{openQuestions} open</strong>
+                  </div>
+                </>
+              )}
+              {saveState !== "idle" ? <span className={`save-state save-state-${saveState}`}>{message}</span> : null}
+            </div>
           </div>
         </div>
 
-        {mode === "Section" ? (
+        {workspaceModule === "Investment Requests" ? (
+          <InvestmentRequestsWorkspace
+            key={activeInvestmentRequest?.id ?? "investment-requests-empty"}
+            profile={workbookProfile}
+            requests={investmentRequests}
+            activeRequest={activeInvestmentRequest}
+            exportPreview={investmentExport}
+            search={investmentSearch}
+            error={investmentError}
+            canEdit={canEditMemo}
+            onSearch={setInvestmentSearch}
+            onSelect={(id) => {
+              setActiveInvestmentId(id);
+              setInvestmentExport(null);
+            }}
+            onCreate={createInvestmentRequest}
+            onSave={(request) => saveInvestmentRequest(request)}
+            onSubmit={(request) => saveInvestmentRequest(request, true)}
+            onExport={loadInvestmentExport}
+            onDownload={downloadInvestmentWorkbook}
+            onDelete={deleteInvestmentRequest}
+          />
+        ) : mode === "Section" ? (
           <div className="section-layout">
             <MemoOutline
-              sections={sections}
+              sections={visibleSections}
               questions={questions}
-              activeId={activeSection.id}
+              activeId={activeSection?.id ?? ""}
               inReviewCount={inReviewCount}
+              inApprovalCount={inApprovalCount}
               onSelect={(id) => setActiveId(id)}
             />
-            <section className="section-shell">
-              <div className="section-header">
-                <div>
-                  <h2 className="mt-2 text-3xl font-bold">{activeSection.title}</h2>
-                  <p className="mt-2 text-base text-[#69665c]">{sectionSubtitle(activeSection)}</p>
-                </div>
-              </div>
-
-              <div className="section-editor-layout">
-                <div className="editor-pane">
-                  <div className="mb-3 flex items-center justify-between gap-3">
-                    <div className="flex flex-wrap gap-2">
-                      {canEditPlan ? sectionReadinessStatuses.map((status) => (
-                        <button
-                          key={status}
-                          className={`small-status ${activeSection.status === status ? "small-status-active" : ""}`}
-                          onClick={() => void saveSection(activeSection, { status })}
-                        >
-                          {status}
-                        </button>
-                      )) : null}
-                    </div>
-                    {canEditPlan ? (
-                      <div className="section-actions">
-                        <button className="toolbar-button" onClick={() => void saveSection(activeSection, { status: "Review" })}>
-                          Mark Ready for Enablement
-                        </button>
-                        <button
-                          className="toolbar-button"
-                          onClick={() => void savePlan({ approvalState: "Review", approvalPosture: "Ready for Executive Approval" })}
-                        >
-                          Mark Memo Ready for Approval
-                        </button>
-                        <button className="primary-button" onClick={() => void saveSection(activeSection, { content: activeSection.content })}>
-                          Save Draft
-                        </button>
-                      </div>
-                    ) : null}
+            {activeSection ? (
+              <section className="section-shell">
+                <button
+                  className="coach-avatar-button"
+                  type="button"
+                  aria-label="Open Coach P"
+                  title="Open Coach P"
+                  onClick={() => setShowCoach(true)}
+                />
+                <div className="section-header">
+                  <div>
+                    <p className="eyebrow">Section {sectionIndex}</p>
+                    <h2 className="mt-2 text-3xl font-bold">{activeSection.title}</h2>
+                    <p className="mt-2 text-base text-[#69665c]">{sectionSubtitle(activeSection)}</p>
                   </div>
-                  {canEditPlan ? (
-                    <textarea
-                      className="memo-editor"
-                      value={activeSection.content}
-                      onChange={(event) => updateSectionContent(activeSection.id, event.target.value)}
-                      placeholder="Draft the section here."
-                    />
-                  ) : (
-                    <div className="memo-read">{activeSection.content || "No draft content yet."}</div>
-                  )}
                 </div>
 
-                <aside className="right-rail">
-                  <button className="guidance-toggle" onClick={() => setShowGuidance(!showGuidance)}>
-                    <span>
-                      <strong>Guidance</strong>
-                      <small>Expectations for this section</small>
-                    </span>
-                    <b>{showGuidance ? "Hide" : "Show"}</b>
-                  </button>
-                  {showGuidance ? <Guidance section={activeSection} /> : null}
-                  {canEditPlan ? <button className="coach-button" onClick={() => setShowCoach(true)}>GPT Coach</button> : null}
-                  <button className="questions-button" onClick={() => setQuestionsOpen(!questionsOpen)}>
-                    Questions ({visibleQuestions.length})
-                  </button>
-                  {questionsOpen ? (
-                    <QuestionPanel
-                      role={role}
-                      readOnly={!canAskQuestions}
-                      questions={visibleQuestions}
-                      sections={sections}
-                      questionDraft={questionDraft}
-                      questionSectionId={questionSectionId}
-                      responseDrafts={responseDrafts}
-                      setQuestionDraft={setQuestionDraft}
-                      setQuestionSectionId={setQuestionSectionId}
-                      setResponseDrafts={setResponseDrafts}
-                      addQuestion={addQuestion}
-                      saveQuestion={saveQuestion}
-                      removeQuestion={removeQuestion}
-                      canDelete={canDelete}
-                    />
-                  ) : null}
-                </aside>
-              </div>
-            </section>
+                <div className="section-editor-layout">
+                  <div className="editor-pane">
+                    <div className="mb-3 flex items-center justify-between gap-3">
+                      <div className="section-status-stack">
+                        <span className={`small-status small-status-active section-status-${activeSection.status.toLowerCase()}`}>
+                          {sectionStatusLabel(activeSection.status)}
+                        </span>
+                        <span className="drafted-count">
+                          {sections.filter((section) => section.content.trim()).length}/{sections.length} drafted
+                        </span>
+                      </div>
+                      <div className="section-actions">
+                        {canEditMemo ? (
+                          <>
+                            <button className="toolbar-button" onClick={() => void saveSection(activeSection, { content: activeSection.content, status: "Draft" })}>
+                              Save Draft
+                            </button>
+                            <button className="toolbar-button" onClick={() => void saveSection(activeSection, { content: activeSection.content, status: "Review" })}>
+                              Save for Review
+                            </button>
+                            <button className="toolbar-button toolbar-button-green" onClick={() => void saveSection(activeSection, { content: activeSection.content, status: "Approved" })}>
+                              Save for Approval
+                            </button>
+                          </>
+                        ) : null}
+                      </div>
+                    </div>
+                    {canEditMemo ? (
+                      <textarea
+                        className="memo-editor"
+                        value={activeSection.content}
+                        onChange={(event) => updateSectionContent(activeSection.id, event.target.value)}
+                        placeholder="Draft the section here."
+                      />
+                    ) : (
+                      <div className="memo-read">{activeSection.content || "No draft content yet."}</div>
+                    )}
+                  </div>
+
+                  <aside className="right-rail">
+                    <button className="guidance-toggle" onClick={() => setShowGuidance(!showGuidance)}>
+                      <span>
+                        <strong>Guidance</strong>
+                        <small>Expectations for this section</small>
+                      </span>
+                      <b>{showGuidance ? "Hide" : "Show"}</b>
+                    </button>
+                    {showGuidance ? <Guidance section={activeSection} /> : null}
+                    <button className="questions-button" onClick={() => setQuestionsOpen(!questionsOpen)}>
+                      Questions ({visibleQuestions.length})
+                    </button>
+                    {questionsOpen ? (
+                      <QuestionPanel
+                        role={role}
+                        currentUserEmail={currentUser?.email ?? ""}
+                        canParticipate={canParticipate}
+                        canEditMemo={canEditMemo}
+                        questions={visibleQuestions}
+                        visibility={visibility}
+                        issueType={issueType}
+                        enablementFunction={enablementFunction}
+                        questionDraft={questionDraft}
+                        responseDrafts={responseDrafts}
+                        setVisibility={setVisibility}
+                        setIssueType={setIssueType}
+                        setEnablementFunction={setEnablementFunction}
+                        setQuestionDraft={setQuestionDraft}
+                        setResponseDrafts={setResponseDrafts}
+                        isAddingQuestion={isAddingQuestion}
+                        addQuestion={addQuestion}
+                        saveQuestion={saveQuestion}
+                        removeQuestion={removeQuestion}
+                        canDelete={canDelete}
+                      />
+                    ) : null}
+                  </aside>
+                </div>
+              </section>
+            ) : (
+              <section className="section-shell empty-workflow-state">
+                <p className="eyebrow">{role} view</p>
+                <h2>No sections are available yet.</h2>
+                <p>
+                  Draft sections are visible only to the Business Team. Sections appear here after the Business Team saves them for {role === "Enablement" ? "review" : "approval"}.
+                </p>
+              </section>
+            )}
           </div>
         ) : (
           <div className={`full-memo-layout full-memo-layout-${role.toLowerCase().replace(/\s+/g, "-")}`}>
             <FullMemo
-              sections={sections}
+              sections={visibleSections}
               title={planTitle}
               role={role}
-              visibleApprovers={role === "Approver" ? visibleApprovers : approvers}
-              approvalConcerns={approvalConcerns}
-              activeQuestionSectionId={questionTargetSection?.id ?? ""}
+              openDependencies={openDependencies}
             />
             <aside className="full-memo-sidebar">
               {role === "Approver" ? (
                 <>
-                  <QuestionRail
-                    role={role}
-                    questions={allVisibleQuestions}
-                    sections={sections}
-                    questionDraft={questionDraft}
-                    questionVisibility={questionVisibility}
-                    questionSectionId={questionSectionId}
-                    responseDrafts={responseDrafts}
-                    setQuestionDraft={setQuestionDraft}
-                    setQuestionVisibility={setQuestionVisibility}
-                    setQuestionSectionId={setQuestionSectionId}
-                    setResponseDrafts={setResponseDrafts}
-                    addQuestion={addQuestion}
-                    saveQuestion={saveQuestion}
-                    removeQuestion={removeQuestion}
-                    canDelete={canDelete}
-                  />
-                  <ApproverControlPanel
-                    approvers={visibleApprovers}
+                  <ApproverModeControl
+                    value={currentApproverMode}
+                    approvedCount={approvedCount}
                     totalApprovers={approvers.length}
-                    approverDrafts={approverDrafts}
-                    newApproverName={newApproverName}
-                    newApproverTitle={newApproverTitle}
-                    setNewApproverName={setNewApproverName}
-                    setNewApproverTitle={setNewApproverTitle}
-                    updateApproverPosture={updateApproverPosture}
-                    addApprover={addApprover}
-                    canManageApprovers={canManageApprovers}
-                  />
-                </>
-              ) : role === "Enablement" ? (
-                <QuestionRail
-                  role={role}
-                  questions={allVisibleQuestions}
-                  sections={sections}
-                  questionDraft={questionDraft}
-                  questionVisibility={questionVisibility}
-                  questionSectionId={questionSectionId}
-                  responseDrafts={responseDrafts}
-                  setQuestionDraft={setQuestionDraft}
-                  setQuestionVisibility={setQuestionVisibility}
-                  setQuestionSectionId={setQuestionSectionId}
-                  setResponseDrafts={setResponseDrafts}
-                  addQuestion={addQuestion}
-                  saveQuestion={saveQuestion}
-                  removeQuestion={removeQuestion}
-                  canDelete={canDelete}
-                />
-              ) : role === "Business Team" ? (
-                <>
-                  <QuestionRail
-                    role={role}
-                    readOnly={!canAskQuestions}
-                    questions={allVisibleQuestions}
-                    sections={sections}
-                    questionDraft={questionDraft}
-                    questionVisibility={questionVisibility}
-                    questionSectionId={questionSectionId}
-                    responseDrafts={responseDrafts}
-                    setQuestionDraft={setQuestionDraft}
-                    setQuestionVisibility={setQuestionVisibility}
-                    setQuestionSectionId={setQuestionSectionId}
-                    setResponseDrafts={setResponseDrafts}
-                    addQuestion={addQuestion}
-                    saveQuestion={saveQuestion}
-                    removeQuestion={removeQuestion}
-                    canDelete={canDelete}
-                    showSectionPicker
-                  />
-                </>
-              ) : (
-                <>
-                  <IssueSummary
-                    questions={allVisibleQuestions}
-                    title="Visible questions"
-                    concernLabel="open items"
-                    dependencyLabel="public dependencies or constraints"
-                    onInspect={(sectionId) => {
-                      setActiveId(sectionId);
-                      setQuestionSectionId(sectionId);
-                      setQuestionsOpen(true);
-                    }}
+                    onChange={changeApproverMode}
                   />
                   {questionsOpen ? (
-                    <QuestionRail
+                    <QuestionDrawer
                       role={role}
-                      readOnly
+                      currentUserEmail={currentUser?.email ?? ""}
+                      canParticipate={canParticipate}
+                      canEditMemo={canEditMemo}
                       questions={allVisibleQuestions}
-                      sections={sections}
+                      visibility={visibility}
+                      issueType={issueType}
+                      enablementFunction={enablementFunction}
                       questionDraft={questionDraft}
-                      questionVisibility={questionVisibility}
-                      questionSectionId={questionSectionId}
                       responseDrafts={responseDrafts}
+                      setVisibility={setVisibility}
+                      setIssueType={setIssueType}
+                      setEnablementFunction={setEnablementFunction}
                       setQuestionDraft={setQuestionDraft}
-                      setQuestionVisibility={setQuestionVisibility}
-                      setQuestionSectionId={setQuestionSectionId}
                       setResponseDrafts={setResponseDrafts}
+                      isAddingQuestion={isAddingQuestion}
                       addQuestion={addQuestion}
                       saveQuestion={saveQuestion}
                       removeQuestion={removeQuestion}
                       canDelete={canDelete}
-                      showSectionPicker
+                      onClose={() => setQuestionsOpen(false)}
                     />
                   ) : null}
+                </>
+              ) : role === "Enablement" ? (
+                <>
+                  {questionsOpen ? (
+                    <QuestionDrawer
+                      role={role}
+                      currentUserEmail={currentUser?.email ?? ""}
+                      canParticipate={canParticipate}
+                      canEditMemo={canEditMemo}
+                      questions={allVisibleQuestions}
+                      visibility={visibility}
+                      issueType={issueType}
+                      enablementFunction={enablementFunction}
+                      questionDraft={questionDraft}
+                      responseDrafts={responseDrafts}
+                      setVisibility={setVisibility}
+                      setIssueType={setIssueType}
+                      setEnablementFunction={setEnablementFunction}
+                      setQuestionDraft={setQuestionDraft}
+                      setResponseDrafts={setResponseDrafts}
+                      isAddingQuestion={isAddingQuestion}
+                      addQuestion={addQuestion}
+                      saveQuestion={saveQuestion}
+                      removeQuestion={removeQuestion}
+                      canDelete={canDelete}
+                      onClose={() => setQuestionsOpen(false)}
+                    />
+                  ) : (
+                    <button className="questions-button" onClick={() => setQuestionsOpen(true)}>
+                      Questions
+                    </button>
+                  )}
+                </>
+              ) : (
+                <>
+                  <QuestionDrawer
+                    role={role}
+                    currentUserEmail={currentUser?.email ?? ""}
+                    canParticipate={canParticipate}
+                    canEditMemo={canEditMemo}
+                    questions={allVisibleQuestions}
+                    visibility={visibility}
+                    issueType={issueType}
+                    enablementFunction={enablementFunction}
+                    questionDraft={questionDraft}
+                    responseDrafts={responseDrafts}
+                    setVisibility={setVisibility}
+                    setIssueType={setIssueType}
+                    setEnablementFunction={setEnablementFunction}
+                    setQuestionDraft={setQuestionDraft}
+                    setResponseDrafts={setResponseDrafts}
+                    isAddingQuestion={isAddingQuestion}
+                    addQuestion={addQuestion}
+                    saveQuestion={saveQuestion}
+                    removeQuestion={removeQuestion}
+                    canDelete={canDelete}
+                    onClose={() => setQuestionsOpen(false)}
+                  />
                 </>
               )}
             </aside>
           </div>
         )}
 
-        {role !== "Approver" && role !== "General" && approvalOpen ? (
-          <ApprovalPanel
-            approvers={approvers}
-            approvedCount={approvedCount}
-            totalApprovers={approvers.length}
-            approverDrafts={approverDrafts}
-            newApproverName={newApproverName}
-            newApproverTitle={newApproverTitle}
-            setNewApproverName={setNewApproverName}
-            setNewApproverTitle={setNewApproverTitle}
-            updateApproverDraft={updateApproverDraft}
-            saveApprover={saveApprover}
-            addApprover={addApprover}
-            canManageApprovers={canManageApprovers}
-            open={approvalOpen}
-            setOpen={setApprovalOpen}
-          />
-        ) : role !== "Approver" && role !== "General" ? (
-          <button className="approval-collapsed" onClick={() => setApprovalOpen(true)}>
-            <span>
-              <strong>Plan approval</strong>
-              <small>{approvedCount}/{approvers.length || 0} approved · executive approval is separate from enablement review</small>
-            </span>
-            <b>Show</b>
-          </button>
-        ) : null}
       </section>
 
       <div className="hidden print:block">
         <MemoPrint sections={sections} title={planTitle} plan={plan} approvers={approvers} />
       </div>
 
-      {showHowTo ? (
-        <Modal title="How to" onClose={() => setShowHowTo(false)}>
-          <ol className="space-y-3 text-sm leading-6 text-[#45413a]">
-            <li>1. Business Team drafts each memo section and saves explicit changes.</li>
-            <li>2. Enablement reads the full plan and asks clarification questions.</li>
-            <li>3. Business Team resolves issues and marks the full memo ready for executive approval.</li>
-            <li>4. Approvers review the formatted memo, set individual posture, and export the memo-only PDF.</li>
-          </ol>
+      {showCoach && activeSection ? (
+        <Modal title="Coach P" onClose={() => setShowCoach(false)}>
+          <CoachActions section={activeSection} />
         </Modal>
       ) : null}
 
-      {showCoach ? (
-        <Modal title="GPT Coach" onClose={() => setShowCoach(false)}>
-          <CoachActions section={activeSection} />
+      {showHelp ? (
+        <Modal title="How to complete the plan" onClose={() => setShowHelp(false)}>
+          <HowToPanel />
         </Modal>
+      ) : null}
+
+      {showSavedToast ? (
+        <div className="saved-toast" role="status" aria-live="polite">
+          Saved
+        </div>
       ) : null}
     </main>
   );
@@ -678,7 +865,7 @@ function Metric({ label, value }: { label: string; value: string }) {
   );
 }
 
-function roleFocus(role: WorkspaceRole) {
+function roleFocus(role: Role) {
   if (role === "Business Team") {
     return {
       label: "Draft Plan",
@@ -688,18 +875,18 @@ function roleFocus(role: WorkspaceRole) {
   if (role === "Enablement") {
     return {
       label: "Enablement Read / Questions",
-      body: "Read the full plan as a partner function and ask focused questions. This is not an approval state.",
+      body: "Read the full plan as a partner function. Ask clarifying questions and flag dependencies, support needs, constraints, or required inputs. This is not an approval state.",
     };
   }
-  if (role === "General") {
+  if (role === "General Reader") {
     return {
-      label: "General Read",
-      body: "Read the current plan and public questions without editing memo content, questions, or approval posture.",
+      label: "Read Only",
+      body: "Read the released memo state. Server permissions prevent memo edits, workflow writes, and approval changes for reader accounts.",
     };
   }
   return {
     label: "Executive Approval",
-    body: "Review the formatted memo, use questions only as needed, and set your individual approver posture separately from the plan lifecycle.",
+    body: "Review the formatted memo, inspect unresolved concerns only as needed, and set individual approver posture separately from the plan lifecycle.",
   };
 }
 
@@ -708,12 +895,14 @@ function MemoOutline({
   questions,
   activeId,
   inReviewCount,
+  inApprovalCount,
   onSelect,
 }: {
   sections: MemoSection[];
   questions: Question[];
   activeId: string;
   inReviewCount: number;
+  inApprovalCount: number;
   onSelect: (id: string) => void;
 }) {
   return (
@@ -721,11 +910,11 @@ function MemoOutline({
       <p className="eyebrow">Memo outline</p>
       <div className="outline-progress">
         <span style={{ width: `${sections.length ? (inReviewCount / sections.length) * 100 : 0}%` }} />
-        <small>{inReviewCount}/{sections.length} in review</small>
+        <small>{inReviewCount}/{sections.length} released, {inApprovalCount} for approval</small>
       </div>
       <nav className="mt-5 space-y-1">
         {sections.map((section) => {
-          const count = questions.filter((question) => question.sectionId === section.id && question.status !== "Resolved").length;
+          const count = questions.filter((question) => question.sectionId === section.id && isOpenQuestionStatus(question.status)).length;
           return (
             <button
               key={section.id}
@@ -764,96 +953,654 @@ function Guidance({ section }: { section: MemoSection }) {
   );
 }
 
+function InvestmentRequestsWorkspace({
+  profile,
+  requests,
+  activeRequest,
+  exportPreview,
+  search,
+  error,
+  canEdit,
+  onSearch,
+  onSelect,
+  onCreate,
+  onSave,
+  onSubmit,
+  onExport,
+  onDownload,
+  onDelete,
+}: {
+  profile: InvestmentWorkbookProfile | null;
+  requests: InvestmentRequest[];
+  activeRequest: InvestmentRequest | null;
+  exportPreview: InvestmentRequestExport | null;
+  search: string;
+  error: string;
+  canEdit: boolean;
+  onSearch: (value: string) => void;
+  onSelect: (id: string) => void;
+  onCreate: (requestType: InvestmentRequestType) => Promise<void>;
+  onSave: (request: InvestmentRequest) => Promise<void>;
+  onSubmit: (request: InvestmentRequest) => Promise<void>;
+  onExport: (request: InvestmentRequest) => Promise<void>;
+  onDownload: (request: InvestmentRequest) => Promise<void>;
+  onDelete: (request: InvestmentRequest) => Promise<void>;
+}) {
+  const [draft, setDraft] = useState<InvestmentRequest | null>(activeRequest);
+  const [showHeadCountGpt, setShowHeadCountGpt] = useState(false);
+
+  if (!profile) {
+    return (
+      <section className="investment-empty">
+        <p className="eyebrow">G&A Engine</p>
+        <h2>No G&A workbook template is configured for this business plan.</h2>
+        <p>Phase 1 only supports the uploaded Data Centers, Energy Solutions, Essentials, and Strategic Capital workbooks.</p>
+      </section>
+    );
+  }
+
+  const submitted = requests.filter((request) => request.status === "Submitted").length;
+
+  function updateDraft(patch: Partial<InvestmentRequest>) {
+    setDraft((current) => (current ? { ...current, ...patch } : current));
+  }
+
+  function updateLine(id: string, patch: Partial<InvestmentRequestLine>) {
+    setDraft((current) =>
+      current
+        ? {
+            ...current,
+            lines: current.lines.map((line) => (line.id === id ? { ...line, ...patch } : line)),
+          }
+        : current,
+    );
+  }
+
+  function addLine() {
+    setDraft((current) =>
+      current
+        ? {
+            ...current,
+            lines: [
+              ...current.lines,
+              {
+                ...emptyInvestmentRequestLine,
+                id: crypto.randomUUID(),
+                lineType: current.requestType,
+              },
+            ],
+          }
+        : current,
+    );
+  }
+
+  function removeLine(id: string) {
+    setDraft((current) =>
+      current
+        ? {
+            ...current,
+            lines: current.lines.length > 1 ? current.lines.filter((line) => line.id !== id) : current.lines,
+          }
+        : current,
+    );
+  }
+
+  return (
+    <div className="investment-layout">
+      <aside className="investment-sidebar">
+        <div>
+          <p className="eyebrow">G&A Engine</p>
+          <h2>{profile.businessUnit}</h2>
+          <p>{submitted}/{requests.length || 0} submitted</p>
+        </div>
+        <input
+          value={search}
+          onChange={(event) => onSearch(event.target.value)}
+          placeholder="Search owner, title, milestone, amount, or keyword"
+          aria-label="Search G&A Engine requests"
+        />
+        <div className="investment-create-row">
+          <button className="primary-button" disabled={!canEdit} onClick={() => void onCreate("Payroll / Headcount")}>
+            Create New Headcount
+          </button>
+          <button className="toolbar-button" disabled={!canEdit} onClick={() => void onCreate("Non-Payroll")}>
+            Create New Non-Payroll
+          </button>
+        </div>
+        <div className="investment-request-list">
+          {requests.length === 0 ? <p className="empty-note">No G&A Engine requests yet.</p> : null}
+          {requests.map((request) => (
+            <div
+              key={request.id}
+              className={`investment-list-item ${activeRequest?.id === request.id ? "investment-list-item-active" : ""}`}
+              onClick={() => onSelect(request.id)}
+              role="button"
+              tabIndex={0}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" || event.key === " ") {
+                  event.preventDefault();
+                  onSelect(request.id);
+                }
+              }}
+            >
+              <button
+                className="investment-delete-button"
+                type="button"
+                title="Delete request"
+                aria-label={`Delete ${request.initiative || "untitled investment request"}`}
+                disabled={!canEdit}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  if (window.confirm("Delete this investment request? This removes it from the system.")) {
+                    void onDelete(request);
+                  }
+                }}
+              >
+                ×
+              </button>
+              <span>{request.initiative || "Untitled request"}</span>
+              <small>{request.requestType} · {request.status}</small>
+            </div>
+          ))}
+        </div>
+      </aside>
+
+      <section className="investment-main">
+        <button
+          className="headcount-help-avatar-button investment-panel-help"
+          type="button"
+          aria-label="Open Head Count Request GPT"
+          title="Open Head Count Request GPT"
+          onClick={() => setShowHeadCountGpt(true)}
+        />
+        {error ? <div className="investment-error">{error}</div> : null}
+        {showHeadCountGpt ? (
+          <Modal title="Head Count Request GPT" onClose={() => setShowHeadCountGpt(false)}>
+            <HeadCountRequestGpt request={draft} />
+          </Modal>
+        ) : null}
+        {!draft ? (
+          <div className="investment-empty">
+            <p className="eyebrow">Guided intake</p>
+            <h2>Create an investment request</h2>
+            <p>Use the workbook-derived form to create a structured request tied to this business plan.</p>
+          </div>
+        ) : (
+          <>
+            <div className="investment-header">
+              <div>
+                <p className="eyebrow">{draft.requestType}</p>
+                <h2>{draft.initiative || "Untitled investment request"}</h2>
+              </div>
+              <div className="investment-actions">
+                <span className={`small-status small-status-active ${draft.status === "Submitted" ? "section-status-approved" : "section-status-draft"}`}>
+                  {draft.status}
+                </span>
+                <div className="investment-action-area">
+                  <div className="investment-button-grid">
+                    <button className="toolbar-button" disabled={!canEdit} onClick={() => draft && void onSave(draft)}>
+                      Save Draft
+                    </button>
+                    <button className="toolbar-button toolbar-button-green" disabled={!canEdit} onClick={() => draft && void onSubmit(draft)}>
+                      Submit
+                    </button>
+                    <button className="toolbar-button" onClick={() => draft && void onExport(draft)}>
+                      Export Preview
+                    </button>
+                    <button className="toolbar-button toolbar-button-green" onClick={() => draft && void onDownload(draft)}>
+                      Download Work
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="investment-form-grid">
+              <label>
+                <span>Owner</span>
+                <input value={draft.ownerName} onChange={(event) => updateDraft({ ownerName: event.target.value })} disabled={!canEdit} />
+              </label>
+              <label>
+                <span>Owner email</span>
+                <input value={draft.ownerEmail} onChange={(event) => updateDraft({ ownerEmail: event.target.value })} disabled={!canEdit} />
+              </label>
+              <label className="investment-wide">
+                <span>Title</span>
+                <input value={draft.initiative} onChange={(event) => updateDraft({ initiative: event.target.value })} disabled={!canEdit} />
+              </label>
+            </div>
+
+            <div className="investment-question-grid">
+              {investmentCaseQuestions.map((question) => (
+                <label key={question.key}>
+                  <span>{question.question}</span>
+                  <small>{question.guidance}</small>
+                  <textarea
+                    value={String(draft[question.key] ?? "")}
+                    onChange={(event) => updateDraft({ [question.key]: event.target.value } as Partial<InvestmentRequest>)}
+                    disabled={!canEdit}
+                  />
+                </label>
+              ))}
+            </div>
+
+            <div className="investment-lines-head">
+              <div>
+                <p className="eyebrow">Workbook input rows</p>
+                <h3>{draft.requestType}</h3>
+              </div>
+              <button className="toolbar-button" disabled={!canEdit} onClick={addLine}>Add row</button>
+            </div>
+
+            <div className="investment-lines">
+              {draft.lines.map((line, index) => (
+                <InvestmentLineEditor
+                  key={line.id}
+                  index={index}
+                  line={line}
+                  requestType={draft.requestType}
+                  groups={profile.groups}
+                  expenseTypes={profile.expenseTypes}
+                  canEdit={canEdit}
+                  onChange={(patch) => updateLine(line.id, patch)}
+                  onRemove={() => removeLine(line.id)}
+                />
+              ))}
+            </div>
+
+            <InvestmentSummary request={draft} />
+            {exportPreview ? <InvestmentExportPreview preview={exportPreview} /> : null}
+          </>
+        )}
+      </section>
+    </div>
+  );
+}
+
+function HeadCountRequestGpt({ request }: { request: InvestmentRequest | null }) {
+  const [prompt, setPrompt] = useState("What role is this for?");
+  const [result, setResult] = useState("");
+  const [error, setError] = useState("");
+  const [isWorking, setIsWorking] = useState(false);
+
+  async function runHeadCountGpt() {
+    const nextPrompt = prompt.trim();
+    if (!nextPrompt || isWorking) return;
+    setIsWorking(true);
+    setError("");
+    setResult("");
+    try {
+      const response = await fetch("/api/head-count-request-gpt", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          prompt: nextPrompt,
+          requestContext: {
+            initiative: request?.initiative,
+            strategicObjective: request?.strategicObjective,
+            milestone: request?.milestone,
+            alternatives: request?.alternatives,
+            measurableOutcome: request?.measurableOutcome,
+            notApprovedImpact: request?.notApprovedImpact,
+            lines: (request?.lines ?? [])
+              .filter((line) => line.lineType === "Payroll / Headcount")
+              .map((line) => ({
+                jobTitle: line.jobTitle,
+                roleHire: line.roleHire,
+                location: line.location,
+                responsibilities: line.responsibilities,
+                hireDate: line.hireDate,
+                notesRationale: line.notesRationale,
+              })),
+          },
+        }),
+      });
+      const payload = (await response.json()) as { result?: string; error?: string };
+      if (!response.ok || !payload.result) {
+        throw new Error(payload.error ?? "Head Count Request GPT request failed.");
+      }
+      setResult(payload.result);
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : "Head Count Request GPT request failed.");
+    } finally {
+      setIsWorking(false);
+    }
+  }
+
+  return (
+    <div className="headcount-gpt">
+      <textarea
+        className="coach-box"
+        value={prompt}
+        onChange={(event) => setPrompt(event.target.value)}
+        placeholder="Ask for concise headcount request drafting help."
+      />
+      <div className="headcount-gpt-actions">
+        <button className="primary-button" disabled={!prompt.trim() || isWorking} onClick={() => void runHeadCountGpt()}>
+          {isWorking ? "Drafting..." : "Draft"}
+        </button>
+      </div>
+      {error ? (
+        <div className="coach-output coach-output-error" role="alert">
+          <p className="eyebrow">Head Count Request GPT error</p>
+          <pre>{error}</pre>
+        </div>
+      ) : null}
+      {result ? (
+        <div className="coach-output" role="status" aria-live="polite">
+          <p className="eyebrow">Head Count Request GPT response</p>
+          <pre>{result}</pre>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function InvestmentLineEditor({
+  index,
+  line,
+  requestType,
+  groups,
+  expenseTypes,
+  canEdit,
+  onChange,
+  onRemove,
+}: {
+  index: number;
+  line: InvestmentRequestLine;
+  requestType: InvestmentRequestType;
+  groups: string[];
+  expenseTypes: string[];
+  canEdit: boolean;
+  onChange: (patch: Partial<InvestmentRequestLine>) => void;
+  onRemove: () => void;
+}) {
+  const hasGroups = groups.length > 0;
+  return (
+    <article className="investment-line-card">
+      <div className="investment-line-title">
+        <strong>Row {index + 1}</strong>
+        <button className="icon-button" disabled={!canEdit} title="Remove row" onClick={onRemove}>×</button>
+      </div>
+      {requestType === "Payroll / Headcount" ? (
+        <div className="investment-form-grid">
+          <p className="investment-sensitive-note investment-wide">
+            Compensation details stay in the restricted Excel and HR/FP&A process. Capture only the business context here.
+          </p>
+          <Field label="Job Title" value={line.jobTitle} disabled={!canEdit} onChange={(value) => onChange({ jobTitle: value })} />
+          {hasGroups ? (
+            <SelectField label="Group" value={line.group} options={groups} disabled={!canEdit} onChange={(value) => onChange({ group: value })} />
+          ) : null}
+          <Field label="Role / Hire" value={line.roleHire} disabled={!canEdit} onChange={(value) => onChange({ roleHire: value })} />
+          <Field label="Location (City/Country)" value={line.location} disabled={!canEdit} onChange={(value) => onChange({ location: value })} />
+          <Field label="Hire Date" type="date" value={line.hireDate} disabled={!canEdit} onChange={(value) => onChange({ hireDate: value })} />
+          <label className="investment-wide">
+            <span>Key Job Responsibilities</span>
+            <textarea value={line.responsibilities} disabled={!canEdit} onChange={(event) => onChange({ responsibilities: event.target.value })} />
+          </label>
+          <label className="investment-wide">
+            <span>Notes / Rationale</span>
+            <textarea value={line.notesRationale} disabled={!canEdit} onChange={(event) => onChange({ notesRationale: event.target.value })} />
+          </label>
+        </div>
+      ) : (
+        <div className="investment-form-grid">
+          <Field label="Expense Description" value={line.expenseDescription} disabled={!canEdit} onChange={(value) => onChange({ expenseDescription: value })} />
+          {hasGroups ? (
+            <SelectField label="Group" value={line.group} options={groups} disabled={!canEdit} onChange={(value) => onChange({ group: value })} />
+          ) : null}
+          <SelectField label="Type of Expense" value={line.expenseType} options={expenseTypes} disabled={!canEdit} onChange={(value) => onChange({ expenseType: value })} />
+          <Field label="Vendor" value={line.vendor} disabled={!canEdit} onChange={(value) => onChange({ vendor: value })} />
+          <NumberField label="Annualized Spend" value={line.annualizedSpend} disabled={!canEdit} onChange={(value) => onChange({ annualizedSpend: value })} />
+          <label className="investment-wide">
+            <span>Notes / Rationale</span>
+            <textarea value={line.notesRationale} disabled={!canEdit} onChange={(event) => onChange({ notesRationale: event.target.value })} />
+          </label>
+        </div>
+      )}
+    </article>
+  );
+}
+
+function Field({
+  label,
+  value,
+  type = "text",
+  disabled,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  type?: string;
+  disabled: boolean;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <label>
+      <span>{label}</span>
+      <input type={type} value={value} disabled={disabled} onChange={(event) => onChange(event.target.value)} />
+    </label>
+  );
+}
+
+function NumberField({
+  label,
+  value,
+  disabled,
+  step = "1",
+  onChange,
+}: {
+  label: string;
+  value: number | null;
+  disabled: boolean;
+  step?: string;
+  onChange: (value: number | null) => void;
+}) {
+  return (
+    <label>
+      <span>{label}</span>
+      <input
+        type="number"
+        step={step}
+        value={value ?? ""}
+        disabled={disabled}
+        onChange={(event) => onChange(event.target.value === "" ? null : Number(event.target.value))}
+      />
+    </label>
+  );
+}
+
+function SelectField({
+  label,
+  value,
+  options,
+  disabled,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  options: string[];
+  disabled: boolean;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <label>
+      <span>{label}</span>
+      <select value={value} disabled={disabled} onChange={(event) => onChange(event.target.value)}>
+        <option value="">Select</option>
+        {options.map((option) => (
+          <option key={option}>{option}</option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
+function InvestmentSummary({ request }: { request: InvestmentRequest }) {
+  const total = request.lines.reduce((sum, line) => sum + (line.annualizedSpend ?? 0), 0);
+  const amountMetric =
+    request.requestType === "Payroll / Headcount"
+      ? "Completed in restricted Excel"
+      : formatCurrency(total);
+  return (
+    <section className="investment-summary">
+      <p className="eyebrow">Executive summary</p>
+      <p>
+        {request.ownerName || "The business owner"} is requesting {request.requestType.toLowerCase()} investment for {request.initiative || "an unnamed title"}.
+        The request supports {request.strategicObjective || "a strategic objective not yet specified"} and is tied to {request.milestone || "a milestone not yet specified"}.
+      </p>
+      <p>
+        Expected outcome: {request.measurableOutcome || "not specified"}. If not approved: {request.notApprovedImpact || "not specified"}.
+      </p>
+      <div className="investment-summary-metrics">
+        <Metric label="Rows" value={`${request.lines.length}`} />
+        <Metric label={request.requestType === "Payroll / Headcount" ? "Compensation detail" : "Input amount"} value={amountMetric} />
+        <Metric label="Status" value={request.status} />
+      </div>
+    </section>
+  );
+}
+
+function InvestmentExportPreview({ preview }: { preview: InvestmentRequestExport }) {
+  return (
+    <section className="investment-export">
+      <p className="eyebrow">Paste-ready Excel export</p>
+      <h3>{preview.workbookName}</h3>
+      <p>Target sheet: {preview.targetSheet}</p>
+      <label>
+        <span>Payroll / Headcount input range: {preview.payrollRange}</span>
+        <textarea readOnly value={preview.payrollTsv} />
+      </label>
+      <label>
+        <span>Non-Payroll input range: {preview.nonPayrollRange}</span>
+        <textarea readOnly value={preview.nonPayrollTsv} />
+      </label>
+    </section>
+  );
+}
+
+function formatCurrency(value: number) {
+  return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(value);
+}
+
 function QuestionPanel(props: QuestionPanelProps) {
   return (
     <div className="question-panel">
-      {props.readOnly ? null : <QuestionComposer {...props} />}
+      <QuestionComposer {...props} />
       <QuestionList {...props} />
     </div>
   );
 }
 
-function QuestionRail(props: QuestionPanelProps) {
+function QuestionDrawer(props: QuestionPanelProps & { onClose: () => void }) {
   return (
-    <aside className="question-rail">
-      <div className="question-rail-head">
+    <aside className="question-drawer">
+      <div className="question-drawer-head">
         <div>
-          <h2>Questions ({props.questions.filter((question) => question.status !== "Resolved").length} open)</h2>
-          <p>Ask focused questions and keep them tied to the right memo section.</p>
+          <p className="eyebrow">Review thread</p>
+          <h2>Questions ({props.questions.filter((question) => isOpenQuestionStatus(question.status)).length} open)</h2>
         </div>
+        <button className="toolbar-button" onClick={props.onClose}>Close</button>
       </div>
-      {props.readOnly ? null : <QuestionComposer {...props} compact />}
-      <QuestionList {...props} compact showSectionTitle />
+      <QuestionComposer {...props} />
+      <QuestionList {...props} />
     </aside>
   );
 }
 
+function ApproverModeControl({
+  value,
+  approvedCount,
+  totalApprovers,
+  onChange,
+}: {
+  value: string;
+  approvedCount: number;
+  totalApprovers: number;
+  onChange: (value: string) => Promise<void>;
+}) {
+  return (
+    <section className="approver-mode-card">
+      <label>
+        <span>Approver mode</span>
+        <select value={value} onChange={(event) => void onChange(event.target.value)}>
+          {approverPostures.map((posture) => (
+            <option key={posture}>{posture}</option>
+          ))}
+        </select>
+      </label>
+      <small>{approvedCount}/{totalApprovers || 0} approved</small>
+    </section>
+  );
+}
+
 type QuestionPanelProps = {
-  role: WorkspaceRole;
-  readOnly?: boolean;
+  role: Role;
+  currentUserEmail: string;
+  canParticipate: boolean;
+  canEditMemo: boolean;
   questions: Question[];
-  sections: MemoSection[];
+  visibility: Visibility;
+  issueType: IssueType;
+  enablementFunction: EnablementFunction;
   questionDraft: string;
-  questionVisibility: "Public" | "Private" | "Draft";
-  questionSectionId: string;
   responseDrafts: Record<string, string>;
+  setVisibility: (visibility: Visibility) => void;
+  setIssueType: (issueType: IssueType) => void;
+  setEnablementFunction: (value: EnablementFunction) => void;
   setQuestionDraft: (draft: string) => void;
-  setQuestionVisibility: (visibility: "Public" | "Private" | "Draft") => void;
-  setQuestionSectionId: (id: string) => void;
   setResponseDrafts: Dispatch<SetStateAction<Record<string, string>>>;
+  isAddingQuestion: boolean;
   addQuestion: () => Promise<void>;
   saveQuestion: (question: Question, patch: Partial<Pick<Question, "status" | "response">>) => Promise<void>;
   removeQuestion: (question: Question) => Promise<void>;
   canDelete: (question: Question) => boolean;
-  compact?: boolean;
-  showSectionPicker?: boolean;
-  showSectionTitle?: boolean;
 };
 
 function QuestionComposer({
   role,
-  sections,
+  currentUserEmail,
+  canParticipate,
+  visibility,
+  enablementFunction,
   questionDraft,
-  questionVisibility,
-  questionSectionId,
+  isAddingQuestion,
+  setVisibility,
+  setEnablementFunction,
   setQuestionDraft,
-  setQuestionVisibility,
-  setQuestionSectionId,
   addQuestion,
-  compact = false,
-  showSectionPicker = false,
 }: QuestionPanelProps) {
-  if (role === "General") return null;
   return (
-    <div className={`question-composer ${compact ? "question-composer-compact" : ""}`}>
+    <div className="question-composer">
       <p className="eyebrow">Ask a question</p>
-      <p className="question-signed-in">Signed in as {currentUserEmail}</p>
-      {showSectionPicker ? (
-        <label className="question-section-picker">
-          <span>Section</span>
-          <select value={questionSectionId} onChange={(event) => setQuestionSectionId(event.target.value)}>
-            {sections.map((section) => (
-              <option key={section.id} value={section.id}>{section.title}</option>
-            ))}
-          </select>
-        </label>
-      ) : null}
-      <label className="question-section-picker">
-        <span>Visibility</span>
-        <select value={questionVisibility} onChange={(event) => setQuestionVisibility(event.target.value as "Public" | "Private" | "Draft")}>
-          <option value="Public">Public</option>
-          <option value="Private">Team only</option>
-          <option value="Draft">Draft</option>
-        </select>
-      </label>
+      <p className="mt-2 text-xs text-[#756f64]">Signed in as {currentUserEmail || "unknown user"}</p>
       <textarea
         value={questionDraft}
         onChange={(event) => setQuestionDraft(event.target.value)}
-        placeholder="Ask a focused clarification question..."
+        placeholder={role === "Enablement" ? "Flag a dependency, support need, required input, or clarification..." : "Ask a focused, section-level question..."}
       />
-      <div className="question-composer-actions">
-        <button className="send-button" title={`Ask as ${role}`} onClick={() => void addQuestion()}>
-          Submit question
+      {role === "Enablement" ? (
+        <div className="mt-3">
+          <select value={enablementFunction} onChange={(event) => setEnablementFunction(event.target.value as EnablementFunction)}>
+            {enablementFunctions.map((item) => (
+              <option key={item}>{item}</option>
+            ))}
+          </select>
+        </div>
+      ) : null}
+      <div className="question-submit-row">
+        <select value={visibility} onChange={(event) => setVisibility(event.target.value as Visibility)}>
+          <option value="Public">Public — everyone sees this</option>
+          <option value="Private">Team only — enablement + business</option>
+          <option value="Draft">Draft — only you</option>
+        </select>
+        <button
+          className="send-button"
+          title={`Ask as ${role}`}
+          disabled={isAddingQuestion || !questionDraft.trim() || !canParticipate}
+          onClick={() => void addQuestion()}
+        >
+          {isAddingQuestion ? "Submitting" : "Submit"}
         </button>
       </div>
     </div>
@@ -862,45 +1609,48 @@ function QuestionComposer({
 
 function QuestionList({
   role,
-  readOnly = false,
+  canParticipate,
+  canEditMemo,
   questions,
-  sections,
   responseDrafts,
   setResponseDrafts,
   saveQuestion,
   removeQuestion,
   canDelete,
-  compact = false,
-  showSectionTitle = false,
 }: QuestionPanelProps) {
-  const sectionTitleById = Object.fromEntries(sections.map((section) => [section.id, section.title]));
-
   return (
-    <div className={`question-list ${compact ? "question-list-compact" : ""}`}>
+    <div className="question-list">
       {questions.length === 0 ? <p className="empty-note">No questions for this view.</p> : null}
       {questions.map((question) => (
         <article key={question.id} className="question-card">
+          {canDelete(question) ? (
+            <button
+              className="delete-question"
+              aria-label="Delete question"
+              title="Delete question"
+              onClick={() => void removeQuestion(question)}
+            >
+              ×
+            </button>
+          ) : null}
           <div className="question-card-head">
-            <div className="question-card-meta">
-              <div className="question-card-tags">
-                <span className="status-tag status-open">{question.status}</span>
-                <span className="status-tag status-public">{question.visibility === "Private" ? "Team only" : question.visibility}</span>
-                {showSectionTitle ? <span className="status-tag status-type">{sectionTitleById[question.sectionId] ?? "Memo section"}</span> : null}
-              </div>
-              <span className="question-author">{question.author}{question.authorEmail ? ` · ${question.authorEmail}` : ""}</span>
-            </div>
+            <span className="status-tag status-open">{question.status}</span>
+            <span className="status-tag status-type">{question.issueType}</span>
+            <span className="status-tag status-public">{question.visibility === "Private" ? "Team only" : question.visibility}</span>
+            <span className="question-author">· {question.functionName ? `${question.functionName} · ` : ""}{question.role}</span>
             <select
+              aria-label="Question status"
               value={question.status}
-              disabled={readOnly}
+              disabled={!canParticipate}
               onChange={(event) => void saveQuestion(question, { status: event.target.value as QuestionStatus })}
             >
-              {questionStatuses.map((status) => (
+              {questionStatusOptions(role, question.status).map((status) => (
                 <option key={status}>{status}</option>
               ))}
             </select>
           </div>
           <p className="question-body">{question.body}</p>
-          {role === "Business Team" && !readOnly ? (
+          {canEditMemo ? (
             <div className="response-editor">
               <p className="eyebrow">Business response</p>
               <textarea
@@ -910,7 +1660,15 @@ function QuestionList({
                 }
                 placeholder="Respond to the question..."
               />
-              <button className="toolbar-button" onClick={() => void saveQuestion(question, { response: responseDrafts[question.id] ?? "" })}>
+              <button
+                className="toolbar-button"
+                onClick={() =>
+                  void saveQuestion(question, {
+                    response: responseDrafts[question.id] ?? "",
+                    status: "Answered",
+                  })
+                }
+              >
                 Save response
               </button>
             </div>
@@ -919,17 +1677,29 @@ function QuestionList({
               <p className="eyebrow">Business response</p>
               <p>{question.response}</p>
             </div>
-          ) : role !== "Business Team" ? (
-            <div className="response-empty">
-              <p>No response yet.</p>
-            </div>
-          ) : null}
-          {canDelete(question) && !readOnly ? (
-            <button className="delete-question" onClick={() => void removeQuestion(question)}>Delete</button>
-          ) : null}
+          ) : (
+            <p className="response-empty">No response yet.</p>
+          )}
         </article>
       ))}
     </div>
+  );
+}
+
+function HowToPanel() {
+  return (
+    <section className="how-to-card" aria-label="How to complete the business plan">
+      <p className="eyebrow">How to complete the plan</p>
+      <ol>
+        <li>Select the correct business plan view before drafting.</li>
+        <li>Use the section guidance to answer with facts, owners, timing, metrics, risks, dependencies, and the decision needed.</li>
+        <li>Save Draft while the Business Team is still working. Drafts are not visible to Enablement or Approvers.</li>
+        <li>Save for Review when Enablement should read the section and ask questions.</li>
+        <li>Resolve questions in the Questions panel, then update the memo text directly.</li>
+        <li>Save for Approval when Tim, Dan, and designated approvers should review the section.</li>
+      </ol>
+      <p>One business owner should own the final answer for each section. Avoid vague alignment asks, unsupported claims, and group-written language that does not name the decision or support needed.</p>
+    </section>
   );
 }
 
@@ -937,44 +1707,37 @@ function FullMemo({
   sections,
   title,
   role,
-  visibleApprovers,
-  approvalConcerns,
-  activeQuestionSectionId,
+  openDependencies,
 }: {
   sections: MemoSection[];
   title: string;
-  role: WorkspaceRole;
-  visibleApprovers: Approver[];
-  approvalConcerns: number;
-  activeQuestionSectionId: string;
+  role: Role;
+  openDependencies: number;
 }) {
   const askSection = sections.find((section) => section.title === "Bottom-Line Ask");
-  const visibleApprovedCount = visibleApprovers.filter((approver) => normalizeApproverPosture(approver.posture) === "Approved").length;
   return (
     <article className="full-memo-card">
       <div className="full-memo-head">
         <p className="eyebrow">Full memo</p>
         <h2>{role === "Business Team" ? "Read the complete plan" : title}</h2>
-        {role === "Approver" ? (
-          <div className="approver-summary">
+        {role === "Enablement" ? (
+          <div className="approver-summary enablement-summary">
             <div>
-              <p className="eyebrow">Bottom-Line Ask</p>
-              <p>{askSection?.content || "Bottom-Line Ask is not drafted yet."}</p>
+              <p className="eyebrow">Enablement review</p>
+              <p>Read the full memo as a partner function and capture implications for your own functional plan.</p>
             </div>
             <div>
-              <p className="eyebrow">Review posture</p>
-              <p>{approvalConcerns} approval question{approvalConcerns === 1 ? "" : "s"} open</p>
-              <p>{visibleApprovedCount}/{visibleApprovers.length || 0} approvers marked approved</p>
+              <p className="eyebrow">Open enablement items</p>
+              <p>{openDependencies} dependencies, support needs, or required inputs open</p>
+              <p>This is an understanding and alignment review, not executive approval.</p>
             </div>
           </div>
         ) : null}
+        {role === "Approver" && askSection?.content ? <p className="memo-ask-line">{askSection.content}</p> : null}
       </div>
-      {sections.map((section, index) => {
+      {sections.length ? sections.map((section, index) => {
         return (
-          <section
-            key={section.id}
-            className={`full-memo-section ${activeQuestionSectionId === section.id ? "full-memo-section-active" : ""}`}
-          >
+          <section key={section.id} className="full-memo-section">
             <div className="flex items-start justify-between gap-4">
               <div>
                 <p className="eyebrow">Section {index + 1}</p>
@@ -984,192 +1747,13 @@ function FullMemo({
             <div className="memo-box">{section.content || "Draft content pending."}</div>
           </section>
         );
-      })}
+      }) : (
+        <section className="full-memo-section">
+          <div className="memo-box">No memo sections are available for this role yet.</div>
+        </section>
+      )}
       <span className="sr-only">{title}</span>
     </article>
-  );
-}
-
-function ApprovalPanel({
-  approvers,
-  approvedCount,
-  totalApprovers,
-  approverDrafts,
-  newApproverName,
-  newApproverTitle,
-  setNewApproverName,
-  setNewApproverTitle,
-  updateApproverDraft,
-  saveApprover,
-  addApprover,
-  canManageApprovers,
-  open,
-  setOpen,
-  compact = false,
-}: {
-  approvers: Approver[];
-  approvedCount: number;
-  totalApprovers: number;
-  approverDrafts: Record<string, string>;
-  newApproverName: string;
-  newApproverTitle: string;
-  setNewApproverName: (value: string) => void;
-  setNewApproverTitle: (value: string) => void;
-  updateApproverDraft: (id: string, posture: string) => void;
-  saveApprover: (approver: Approver) => Promise<void>;
-  addApprover: () => Promise<void>;
-  canManageApprovers: boolean;
-  open: boolean;
-  setOpen: (open: boolean) => void;
-  compact?: boolean;
-}) {
-  const isOpen = compact ? true : open;
-  return (
-    <section className={`approval-panel ${compact ? "approval-panel-compact" : ""}`}>
-      <button className="approval-panel-head" onClick={compact ? undefined : () => setOpen(!open)}>
-        <span>
-          <strong>Executive approval</strong>
-          <small>{approvedCount}/{totalApprovers || 0} approved · individual posture is separate from plan status</small>
-        </span>
-        <b>{isOpen ? "Hide" : "Show"}</b>
-      </button>
-      {isOpen ? (
-        <div className="approval-grid">
-          {approvers.length === 0 ? <p className="empty-note">No approver lane is assigned to this user.</p> : null}
-          {approvers.map((approver) => (
-            <div key={approver.id} className="approver-card">
-              <div>
-                <p className="font-bold">{approver.name}</p>
-                <p className="text-sm text-[#756f64]">{approver.title}</p>
-              </div>
-              <div className="approver-control-row">
-                <select
-                  value={normalizeApproverPosture(approverDrafts[approver.id] ?? approver.posture)}
-                  onChange={(event) => updateApproverDraft(approver.id, event.target.value)}
-                >
-                  {approverPostures.map((posture) => (
-                    <option key={posture}>{posture}</option>
-                  ))}
-                </select>
-                <button className="toolbar-button" onClick={() => void saveApprover(approver)}>Save</button>
-              </div>
-            </div>
-          ))}
-          {canManageApprovers ? (
-            <div className="approver-card approver-admin-card">
-              <p className="eyebrow">Admin</p>
-              <p className="text-sm text-[#756f64]">Will can add approvers for the full memo.</p>
-              <input value={newApproverName} onChange={(event) => setNewApproverName(event.target.value)} placeholder="Add approver name" />
-              <input value={newApproverTitle} onChange={(event) => setNewApproverTitle(event.target.value)} placeholder="Title or role" />
-              <button className="primary-button" onClick={() => void addApprover()}>Add approver</button>
-            </div>
-          ) : null}
-        </div>
-      ) : null}
-    </section>
-  );
-}
-
-function ApproverControlPanel({
-  approvers,
-  totalApprovers,
-  approverDrafts,
-  newApproverName,
-  newApproverTitle,
-  setNewApproverName,
-  setNewApproverTitle,
-  updateApproverPosture,
-  addApprover,
-  canManageApprovers,
-}: {
-  approvers: Approver[];
-  totalApprovers: number;
-  approverDrafts: Record<string, string>;
-  newApproverName: string;
-  newApproverTitle: string;
-  setNewApproverName: (value: string) => void;
-  setNewApproverTitle: (value: string) => void;
-  updateApproverPosture: (approver: Approver, posture: string) => Promise<void>;
-  addApprover: () => Promise<void>;
-  canManageApprovers: boolean;
-}) {
-  return (
-    <section className="approver-control-panel">
-      <div className="approver-control-head">
-        <div>
-          <p className="eyebrow">Approval</p>
-          <h2>{approvers.filter((approver) => normalizeApproverPosture(approver.posture) === "Approved").length}/{totalApprovers || 0} approved</h2>
-        </div>
-        <p>Questions keeps review open. Approved marks the full plan approved for that approver.</p>
-      </div>
-      <div className="approver-control-list">
-        {approvers.map((approver) => (
-          <label key={approver.id} className="approver-inline-control">
-            <span>{approver.name}</span>
-            <select
-              value={normalizeApproverPosture(approverDrafts[approver.id] ?? approver.posture)}
-              onChange={(event) => void updateApproverPosture(approver, event.target.value)}
-            >
-              {approverPostures.map((posture) => (
-                <option key={posture} value={posture}>{posture}</option>
-              ))}
-            </select>
-          </label>
-        ))}
-        {approvers.length === 0 ? <p className="empty-note">No approver lane is assigned to this user.</p> : null}
-      </div>
-      {canManageApprovers ? (
-        <div className="approver-control-admin">
-          <p className="eyebrow">Admin</p>
-          <input value={newApproverName} onChange={(event) => setNewApproverName(event.target.value)} placeholder="Add approver name" />
-          <input value={newApproverTitle} onChange={(event) => setNewApproverTitle(event.target.value)} placeholder="Title or role" />
-          <button className="primary-button" onClick={() => void addApprover()}>Add approver</button>
-        </div>
-      ) : null}
-    </section>
-  );
-}
-
-function IssueSummary({
-  questions,
-  title = "Open items",
-  concernLabel = "approval concerns",
-  dependencyLabel = "enablement dependencies or constraints",
-  onInspect,
-}: {
-  questions: Question[];
-  title?: string;
-  concernLabel?: string;
-  dependencyLabel?: string;
-  onInspect: (sectionId: string) => void;
-}) {
-  const openItems = questions.filter((question) => question.status !== "Resolved");
-  const concerns = openItems.filter((question) =>
-    concernLabel === "approval concerns"
-      ? question.issueType === "Approval Concern"
-      : ["Support Need", "Functional Dependency", "Required Input", "Risk / Constraint"].includes(question.issueType),
-  );
-  const dependencies = openItems.filter((question) =>
-    ["Functional Dependency", "Support Need", "Required Input", "Risk / Constraint"].includes(question.issueType),
-  );
-
-  return (
-    <section className="issue-summary">
-      <div>
-        <p className="eyebrow">{title}</p>
-        <h2>{concerns.length} {concernLabel}</h2>
-        <p>{dependencies.length} {dependencyLabel} remain open.</p>
-      </div>
-      <div className="issue-summary-list">
-        {openItems.slice(0, 4).map((question) => (
-          <button key={question.id} onClick={() => onInspect(question.sectionId)}>
-            <span>{question.issueType}</span>
-            <b>{question.status}</b>
-          </button>
-        ))}
-        {openItems.length === 0 ? <p className="empty-note">No open issues.</p> : null}
-      </div>
-    </section>
   );
 }
 
@@ -1218,6 +1802,11 @@ function Modal({ title, children, onClose }: { title: string; children: ReactNod
 }
 
 function CoachActions({ section }: { section: MemoSection }) {
+  const [context, setContext] = useState("");
+  const [coachResult, setCoachResult] = useState("");
+  const [coachError, setCoachError] = useState("");
+  const [activeAction, setActiveAction] = useState("");
+  const [isCoaching, setIsCoaching] = useState(false);
   const actions = [
     "Tighten this section",
     "Make this more executive-ready",
@@ -1229,6 +1818,38 @@ function CoachActions({ section }: { section: MemoSection }) {
     ...sectionCoachActions(section.title),
   ];
 
+  async function runCoachAction(action: string) {
+    setIsCoaching(true);
+    setActiveAction(action);
+    setCoachError("");
+    setCoachResult("");
+    try {
+      const response = await fetch("/api/coach", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          action,
+          sectionTitle: section.title,
+          sectionPrompt: section.prompt,
+          sectionFormat: section.format,
+          sectionEmphasize: section.emphasize,
+          sectionAvoid: section.avoid,
+          sectionContent: section.content,
+          context,
+        }),
+      });
+      const payload = (await response.json()) as { result?: string; error?: string };
+      if (!response.ok || !payload.result) {
+        throw new Error(payload.error ?? "Coach P request failed.");
+      }
+      setCoachResult(payload.result);
+    } catch (error) {
+      setCoachError(error instanceof Error ? error.message : "Coach P request failed.");
+    } finally {
+      setIsCoaching(false);
+    }
+  }
+
   return (
     <div>
       <p className="text-sm leading-6 text-[#45413a]">
@@ -1236,13 +1857,29 @@ function CoachActions({ section }: { section: MemoSection }) {
       </p>
       <div className="coach-action-grid">
         {actions.map((action) => (
-          <button key={action} className="toolbar-button">{action}</button>
+          <button key={action} className="toolbar-button" disabled={isCoaching} onClick={() => void runCoachAction(action)}>
+            {isCoaching && activeAction === action ? "Working..." : action}
+          </button>
         ))}
       </div>
       <textarea
         className="coach-box mt-4"
         placeholder={`Optional context for ${section.title}. Do not add facts unless they are supplied here.`}
+        value={context}
+        onChange={(event) => setContext(event.target.value)}
       />
+      {coachError ? (
+        <div className="coach-output coach-output-error mt-4" role="alert">
+          <p className="eyebrow">Coach P error</p>
+          <pre>{coachError}</pre>
+        </div>
+      ) : null}
+      {coachResult ? (
+        <div className="coach-output mt-4" role="status" aria-live="polite">
+          <p className="eyebrow">Coach P response</p>
+          <pre>{coachResult}</pre>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -1258,20 +1895,74 @@ function guidanceBullets(section: MemoSection) {
       "What is this business trying to become in 2027?",
       "Why does it matter to Prologis?",
       "What is the core business thesis?",
-      "What are the 3-5 most important takeaways from the plan?",
+      "Then provide 3-5 bullets that summarize the most important takeaways from the plan.",
+    ];
+  }
+  if (section.title === "2027 Priorities") {
+    return [
+      "What is the priority?",
+      "Why is it a priority in 2027?",
+      "What decision or action does it require?",
+      "What is the expected outcome if we execute well?",
+      "Only include priorities that are critical to the success of the business. This section should force prioritization, not document every initiative underway.",
+    ];
+  }
+  if (section.title === "Growth Opportunities") {
+    return [
+      "What is the opportunity?",
+      "How large could the opportunity become?",
+      "What customer need does it address?",
+      "Why does Prologis have a right to win or a right to play?",
+      "What would need to happen for the opportunity to scale?",
+      "Focus on opportunities that could meaningfully impact the business over the next several years.",
+    ];
+  }
+  if (section.title === "Support Needed from the Company") {
+    return [
+      "What approvals are needed?",
+      "What organizational support is required?",
+      "What cross-functional dependencies matter most?",
+      "What decisions or actions would accelerate progress?",
+      "What could slow execution if not addressed?",
+      "Be specific and direct.",
+    ];
+  }
+  if (section.title === "AI and Productivity Strategy") {
+    return [
+      "How will AI be incorporated into the team's operating model?",
+      "What activities will be automated, accelerated, or augmented?",
+      "What measurable efficiency gains are expected?",
+      "How will AI improve decision-making, customer engagement, analysis, or execution?",
+      "How does AI influence the team's future hiring strategy?",
+    ];
+  }
+  if (section.title === "Headcount Needs") {
+    return [
+      "What role or capability is needed?",
+      "What business problem does it solve?",
+      "Why is it needed now?",
+      "How does it support revenue growth, execution speed, or risk reduction?",
+      "What is the expected return on the investment?",
+      "Every request should have a clear business rationale.",
+    ];
+  }
+  if (section.title === "Key Risks and Dependencies") {
+    return [
+      "What are the biggest risks?",
+      "What assumptions must prove true?",
+      "What dependencies exist inside or outside Prologis?",
+      "What would cause us to slow down, change course, or stop?",
+      "Only include risks that matter to the approval decision.",
+    ];
+  }
+  if (section.title === "Bottom-Line Ask") {
+    return [
+      "What are we asking leadership to approve?",
+      "What are the key drivers of success in 2027?",
+      "What is the most important takeaway from the plan?",
     ];
   }
   return [section.prompt, section.emphasize, section.avoid];
-}
-
-function isWorkspaceRole(value: string | null): value is WorkspaceRole {
-  return roles.includes(value as WorkspaceRole);
-}
-
-function getStoredRole() {
-  if (typeof window === "undefined") return null;
-  const storedRole = window.localStorage.getItem(roleStorageKey);
-  return isWorkspaceRole(storedRole) ? storedRole : null;
 }
 
 function sectionCoachActions(title: string) {

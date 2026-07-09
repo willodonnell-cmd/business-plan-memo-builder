@@ -1,0 +1,44 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "CODEX_COACH_TELEMETRY=jsonl '/Users/willodonnell/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node' '/Users/willodonnell/Documents/New project/scripts/codex-hook-adapter.mjs' SessionStart"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "CODEX_COACH_TELEMETRY=jsonl '/Users/willodonnell/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node' '/Users/willodonnell/Documents/New project/scripts/codex-hook-adapter.mjs' UserPromptSubmit"
+          }
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "CODEX_COACH_TELEMETRY=jsonl '/Users/willodonnell/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node' '/Users/willodonnell/Documents/New project/scripts/codex-hook-adapter.mjs' PreCompact"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "CODEX_COACH_TELEMETRY=jsonl '/Users/willodonnell/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node' '/Users/willodonnell/Documents/New project/scripts/codex-hook-adapter.mjs' Stop"
+          }
+        ]
+      }
+    ]
+  }
+}
