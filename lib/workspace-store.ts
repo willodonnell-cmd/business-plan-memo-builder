@@ -25,6 +25,7 @@ import {
   investmentWorkbookProfiles,
   sectionDefaults,
 } from "./workspace-defaults";
+import { cleanDisplayName, displayNameFromEmail, normalizeEmail, resolveActorIdentityFromRequest } from "./request-identity";
 
 type BusinessPlanRow = {
   id: string;
@@ -144,24 +145,20 @@ export function resolvePlanId(value?: string | null) {
 }
 
 export async function getActorFromRequest(request: Request): Promise<Actor> {
-  const headerEmail =
-    request.headers.get("oai-authenticated-user-email") ??
-    request.headers.get("cf-access-authenticated-user-email") ??
-    request.headers.get("x-authenticated-user-email");
-  const email = normalizeEmail(headerEmail) ?? adminEmail;
+  const identity = resolveActorIdentityFromRequest(request);
   const d1 = getD1();
   await ensureSchema(d1);
-  await ensureUserProfile(d1, email);
+  await ensureUserProfile(d1, identity.email, identity.displayName);
 
   const row = await d1
     .prepare("SELECT email, display_name, role FROM user_profiles WHERE email = ?")
-    .bind(email)
+    .bind(identity.email)
     .first<{ email: string; display_name: string | null; role: Role }>();
 
   return {
-    email,
-    displayName: row?.display_name?.trim() || displayNameFromEmail(email),
-    role: normalize(row?.role, allowedRoles, email === adminEmail ? "Business Team" : "General Reader"),
+    email: identity.email,
+    displayName: row?.display_name?.trim() || identity.displayName || displayNameFromEmail(identity.email),
+    role: normalize(row?.role, allowedRoles, identity.email === adminEmail ? "Business Team" : "General Reader"),
   };
 }
 
@@ -1284,13 +1281,23 @@ function questionRoleForActor(actor: Actor): Exclude<Role, "General Reader"> {
   return "Business Team";
 }
 
-async function ensureUserProfile(d1: D1Database, email: string) {
+async function ensureUserProfile(d1: D1Database, email: string, displayName: string) {
   const now = Date.now();
   const existing = await d1
-    .prepare("SELECT email FROM user_profiles WHERE email = ?")
+    .prepare("SELECT email, display_name FROM user_profiles WHERE email = ?")
     .bind(email)
-    .first<{ email: string }>();
+    .first<{ email: string; display_name: string | null }>();
   if (existing) {
+    const existingDisplayName = cleanDisplayName(existing.display_name);
+    if (
+      cleanDisplayName(displayName) &&
+      (!existingDisplayName || existingDisplayName === displayNameFromEmail(email))
+    ) {
+      await d1
+        .prepare("UPDATE user_profiles SET display_name = ?, updated_at = ? WHERE email = ?")
+        .bind(displayName, now, email)
+        .run();
+    }
     return;
   }
 
@@ -1298,7 +1305,7 @@ async function ensureUserProfile(d1: D1Database, email: string) {
     .prepare("INSERT INTO user_profiles (email, display_name, role, created_at, updated_at) VALUES (?, ?, ?, ?, ?)")
     .bind(
       email,
-      displayNameFromEmail(email),
+      displayName,
       email === adminEmail ? "Business Team" : "General Reader",
       now,
       now,
@@ -1333,23 +1340,6 @@ async function recordActivity(
       Date.now(),
     )
     .run();
-}
-
-function normalizeEmail(value?: string | null) {
-  const email = value?.trim().toLowerCase();
-  if (!email || !email.includes("@")) {
-    return null;
-  }
-  return email;
-}
-
-function displayNameFromEmail(email: string) {
-  const localPart = email.split("@")[0] ?? email;
-  return localPart
-    .split(/[._-]+/)
-    .filter(Boolean)
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-    .join(" ") || email;
 }
 
 function normalize<T extends readonly string[]>(value: unknown, allowed: T, fallback: T[number]): T[number] {
