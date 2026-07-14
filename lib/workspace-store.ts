@@ -1,4 +1,5 @@
 import { getD1 } from "../db";
+import { hasGodAccess } from "./access-control";
 import {
   DEFAULT_PLAN_ID,
   type ActivityEvent,
@@ -12,6 +13,7 @@ import {
   type InvestmentRequestStatus,
   type InvestmentRequestType,
   type IssueType,
+  type MemoSectionVersion,
   type Question,
   type QuestionStatus,
   type Role,
@@ -42,6 +44,18 @@ type SectionRow = {
   position: number;
   content: string;
   status: SectionStatus;
+};
+
+type SectionVersionRow = {
+  id: string;
+  section_id: string;
+  content: string;
+  created_at: number;
+  created_by_email: string;
+  created_by_name: string;
+  action_type: "edit" | "restore";
+  source_version_id: string | null;
+  note: string | null;
 };
 
 type QuestionRow = {
@@ -158,7 +172,9 @@ export async function getActorFromRequest(request: Request): Promise<Actor> {
   return {
     email: identity.email,
     displayName: row?.display_name?.trim() || identity.displayName || displayNameFromEmail(identity.email),
-    role: normalize(row?.role, allowedRoles, identity.email === adminEmail ? "Business Team" : "General Reader"),
+    role: hasGodAccess(identity.email)
+      ? "Business Team"
+      : normalize(row?.role, allowedRoles, "General Reader"),
   };
 }
 
@@ -218,6 +234,21 @@ export async function getWorkspacePlan(planIdInput?: string | null, actorInput?:
     )
     .bind(planId)
     .all<ActivityRow>();
+  const sectionVersions =
+    actor.role === "Business Team"
+      ? await d1
+          .prepare(
+            "SELECT id, section_id, content, created_at, created_by_email, created_by_name, action_type, source_version_id, note FROM memo_section_versions WHERE plan_id = ? ORDER BY created_at DESC",
+          )
+          .bind(planId)
+          .all<SectionVersionRow>()
+      : { results: [] as SectionVersionRow[] };
+  const versionsBySection = new Map<string, MemoSectionVersion[]>();
+  for (const version of sectionVersions.results ?? []) {
+    const currentVersions = versionsBySection.get(version.section_id) ?? [];
+    currentVersions.push(toSectionVersion(version));
+    versionsBySection.set(version.section_id, currentVersions);
+  }
 
   return {
     id: plan.id,
@@ -238,6 +269,7 @@ export async function getWorkspacePlan(planIdInput?: string | null, actorInput?:
         avoid: defaults?.avoid ?? "",
         content: section.content,
         status: section.status,
+        ...(actor.role === "Business Team" ? { versions: versionsBySection.get(section.id) ?? [] } : {}),
       };
     }),
     questions: (questions.results ?? []).map(toQuestion),
@@ -304,13 +336,100 @@ export async function updateSection(
 
   const nextContent = input.content ?? current.content;
   const nextStatus = normalize(input.status, allowedSectionStatuses, current.status);
+  const contentChanged = input.content !== undefined && nextContent !== current.content;
+  const now = Date.now();
+  if (contentChanged) {
+    await ensureCurrentSectionVersion(d1, planId, id, current.content, current.status, now);
+  }
   await d1
     .prepare("UPDATE memo_sections SET content = ?, status = ?, updated_at = ? WHERE id = ? AND plan_id = ?")
-    .bind(nextContent, nextStatus, Date.now(), id, planId)
+    .bind(nextContent, nextStatus, now, id, planId)
     .run();
+  if (contentChanged) {
+    const versionId = await createSectionVersion(d1, {
+      planId,
+      sectionId: id,
+      content: nextContent,
+      actor,
+      actionType: "edit",
+      sourceVersionId: null,
+      note: "",
+      now,
+    });
+    await d1
+      .prepare("UPDATE memo_sections SET current_version_id = ? WHERE id = ? AND plan_id = ?")
+      .bind(versionId, id, planId)
+      .run();
+    await recordActivity(d1, planId, actor, "memo_section_version", versionId, "section.version.created", null, {
+      sectionId: id,
+      actionType: "edit",
+    });
+  }
   await recordActivity(d1, planId, actor, "memo_section", id, "section.updated", current, {
     content: nextContent,
     status: nextStatus,
+  });
+}
+
+export async function restoreSectionVersion(
+  id: string,
+  versionId: string,
+  input: { planId?: string; note?: string },
+  actor: Actor,
+) {
+  assertCan(actor, "edit_memo");
+  const planId = resolvePlanId(input.planId);
+  const d1 = getD1();
+  await ensureSchema(d1);
+  await ensureDefaultWorkstreams(d1);
+
+  const current = await d1
+    .prepare("SELECT content, status FROM memo_sections WHERE id = ? AND plan_id = ?")
+    .bind(id, planId)
+    .first<{ content: string; status: SectionStatus }>();
+
+  if (!current) {
+    throw new Error("Section not found.");
+  }
+
+  const source = await d1
+    .prepare("SELECT id, content FROM memo_section_versions WHERE id = ? AND section_id = ? AND plan_id = ?")
+    .bind(versionId, id, planId)
+    .first<{ id: string; content: string }>();
+
+  if (!source) {
+    throw new Error("Version not found.");
+  }
+
+  const now = Date.now();
+  await ensureCurrentSectionVersion(d1, planId, id, current.content, current.status, now);
+  await d1
+    .prepare("UPDATE memo_sections SET content = ?, updated_at = ? WHERE id = ? AND plan_id = ?")
+    .bind(source.content, now, id, planId)
+    .run();
+
+  const restoredVersionId = await createSectionVersion(d1, {
+    planId,
+    sectionId: id,
+    content: source.content,
+    actor,
+    actionType: "restore",
+    sourceVersionId: source.id,
+    note: input.note?.trim() ?? "",
+    now,
+  });
+  await d1
+    .prepare("UPDATE memo_sections SET current_version_id = ? WHERE id = ? AND plan_id = ?")
+    .bind(restoredVersionId, id, planId)
+    .run();
+  await recordActivity(d1, planId, actor, "memo_section_version", restoredVersionId, "section.version.restored", null, {
+    sectionId: id,
+    sourceVersionId: source.id,
+  });
+  await recordActivity(d1, planId, actor, "memo_section", id, "section.restored", current, {
+    content: source.content,
+    status: current.status,
+    sourceVersionId: source.id,
   });
 }
 
@@ -976,7 +1095,8 @@ function toTsv(headers: string[], rows: Array<Array<string | number>>) {
 async function ensureSchema(d1: D1Database) {
   const statements = [
     "CREATE TABLE IF NOT EXISTS business_plans (id text PRIMARY KEY NOT NULL, title text NOT NULL, team_name text NOT NULL, approval_state text DEFAULT 'Draft' NOT NULL, approval_posture text DEFAULT 'Drafting' NOT NULL, created_by text, updated_at integer NOT NULL)",
-    "CREATE TABLE IF NOT EXISTS memo_sections (id text PRIMARY KEY NOT NULL, plan_id text NOT NULL, section_key text NOT NULL, title text NOT NULL, position integer NOT NULL, requirement text DEFAULT '' NOT NULL, content text DEFAULT '' NOT NULL, status text DEFAULT 'Draft' NOT NULL, updated_at integer NOT NULL, FOREIGN KEY (plan_id) REFERENCES business_plans(id) ON DELETE cascade)",
+    "CREATE TABLE IF NOT EXISTS memo_sections (id text PRIMARY KEY NOT NULL, plan_id text NOT NULL, section_key text NOT NULL, title text NOT NULL, position integer NOT NULL, requirement text DEFAULT '' NOT NULL, content text DEFAULT '' NOT NULL, status text DEFAULT 'Draft' NOT NULL, current_version_id text, updated_at integer NOT NULL, FOREIGN KEY (plan_id) REFERENCES business_plans(id) ON DELETE cascade)",
+    "CREATE TABLE IF NOT EXISTS memo_section_versions (id text PRIMARY KEY NOT NULL, plan_id text NOT NULL, section_id text NOT NULL, content text DEFAULT '' NOT NULL, created_at integer NOT NULL, created_by_email text NOT NULL, created_by_name text NOT NULL, action_type text DEFAULT 'edit' NOT NULL, source_version_id text, note text DEFAULT '' NOT NULL, FOREIGN KEY (plan_id) REFERENCES business_plans(id) ON DELETE cascade, FOREIGN KEY (section_id) REFERENCES memo_sections(id) ON DELETE cascade, FOREIGN KEY (source_version_id) REFERENCES memo_section_versions(id) ON DELETE set null)",
     "CREATE TABLE IF NOT EXISTS section_questions (id text PRIMARY KEY NOT NULL, plan_id text NOT NULL, section_id text NOT NULL, author_name text NOT NULL, author_role text NOT NULL, visibility text DEFAULT 'Public' NOT NULL, status text DEFAULT 'Open' NOT NULL, issue_type text DEFAULT 'Clarification' NOT NULL, function_name text DEFAULT '' NOT NULL, body text NOT NULL, response text, created_at integer NOT NULL, updated_at integer NOT NULL, FOREIGN KEY (plan_id) REFERENCES business_plans(id) ON DELETE cascade, FOREIGN KEY (section_id) REFERENCES memo_sections(id) ON DELETE cascade)",
     "CREATE TABLE IF NOT EXISTS approvers (id text PRIMARY KEY NOT NULL, plan_id text NOT NULL, name text NOT NULL, title text NOT NULL, posture text DEFAULT 'Reviewing' NOT NULL, updated_at integer NOT NULL, FOREIGN KEY (plan_id) REFERENCES business_plans(id) ON DELETE cascade)",
     "CREATE TABLE IF NOT EXISTS user_profiles (email text PRIMARY KEY NOT NULL, display_name text, role text DEFAULT 'General Reader' NOT NULL, created_at integer NOT NULL, updated_at integer NOT NULL)",
@@ -990,15 +1110,22 @@ async function ensureSchema(d1: D1Database) {
   for (const statement of statements) {
     await d1.prepare(statement).run();
   }
+  await d1
+    .prepare("CREATE INDEX IF NOT EXISTS memo_section_versions_section_created_idx ON memo_section_versions(section_id, created_at DESC)")
+    .run();
+  await d1
+    .prepare("CREATE INDEX IF NOT EXISTS memo_section_versions_plan_created_idx ON memo_section_versions(plan_id, created_at DESC)")
+    .run();
 
   await addColumnIfMissing(d1, "business_plans", "approval_state", "text DEFAULT 'Draft' NOT NULL");
   await addColumnIfMissing(d1, "business_plans", "approval_posture", "text DEFAULT 'Drafting' NOT NULL");
   await addColumnIfMissing(d1, "business_plans", "created_by", "text");
   await addColumnIfMissing(d1, "memo_sections", "section_key", "text");
   await addColumnIfMissing(d1, "memo_sections", "requirement", "text DEFAULT '' NOT NULL");
+  await addColumnIfMissing(d1, "memo_sections", "current_version_id", "text");
   await addColumnIfMissing(d1, "section_questions", "issue_type", "text DEFAULT 'Clarification' NOT NULL");
   await addColumnIfMissing(d1, "section_questions", "function_name", "text DEFAULT '' NOT NULL");
-  await ensureUserProfile(d1, adminEmail);
+  await ensureUserProfile(d1, adminEmail, displayNameFromEmail(adminEmail));
   await backfillSectionKeys(d1);
   await clearExistingMemoContentOnce(d1);
   await clearWorkflowTestDataOnce(d1);
@@ -1203,6 +1330,20 @@ function toActivityEvent(row: ActivityRow): ActivityEvent {
   };
 }
 
+function toSectionVersion(row: SectionVersionRow): MemoSectionVersion {
+  return {
+    id: row.id,
+    sectionId: row.section_id,
+    content: row.content,
+    createdAt: row.created_at,
+    createdByEmail: row.created_by_email,
+    createdByName: row.created_by_name,
+    actionType: row.action_type === "restore" ? "restore" : "edit",
+    sourceVersionId: row.source_version_id,
+    note: row.note ?? "",
+  };
+}
+
 function toInvestmentRequest(row: InvestmentRequestRow, lineRows: InvestmentRequestLineRow[]): InvestmentRequest {
   return {
     id: row.id,
@@ -1239,6 +1380,74 @@ function parseInvestmentLine(row: InvestmentRequestLineRow): InvestmentRequestLi
   };
 }
 
+async function createSectionVersion(
+  d1: D1Database,
+  input: {
+    planId: string;
+    sectionId: string;
+    content: string;
+    actor: Actor;
+    actionType: "edit" | "restore";
+    sourceVersionId: string | null;
+    note: string;
+    now: number;
+  },
+) {
+  const versionId = crypto.randomUUID();
+  await d1
+    .prepare(
+      "INSERT INTO memo_section_versions (id, plan_id, section_id, content, created_at, created_by_email, created_by_name, action_type, source_version_id, note) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    )
+    .bind(
+      versionId,
+      input.planId,
+      input.sectionId,
+      input.content,
+      input.now,
+      input.actor.email,
+      input.actor.displayName || displayNameFromEmail(input.actor.email),
+      input.actionType,
+      input.sourceVersionId,
+      input.note,
+    )
+    .run();
+  return versionId;
+}
+
+async function ensureCurrentSectionVersion(
+  d1: D1Database,
+  planId: string,
+  sectionId: string,
+  content: string,
+  status: SectionStatus,
+  now: number,
+) {
+  if (!content.trim()) {
+    return;
+  }
+  const existing = await d1
+    .prepare("SELECT id FROM memo_section_versions WHERE plan_id = ? AND section_id = ? LIMIT 1")
+    .bind(planId, sectionId)
+    .first<{ id: string }>();
+  if (existing) {
+    return;
+  }
+  await createSectionVersion(d1, {
+    planId,
+    sectionId,
+    content,
+    actor: {
+      email: "system@prologis.local",
+      displayName: "Existing content",
+      role: "Business Team",
+    },
+    actionType: "edit",
+    sourceVersionId: null,
+    note: `Seeded from current section content before version history was enabled. Status: ${status}.`,
+    now: now - 1,
+  });
+}
+
 type Permission =
   | "manage_plan"
   | "edit_memo"
@@ -1251,7 +1460,7 @@ type Permission =
   | "investment_write";
 
 function assertCan(actor: Actor, permission: Permission) {
-  if (actor.email === adminEmail) {
+  if (hasGodAccess(actor.email)) {
     return;
   }
   if (actor.role === "Business Team") {
@@ -1306,7 +1515,7 @@ async function ensureUserProfile(d1: D1Database, email: string, displayName: str
     .bind(
       email,
       displayName,
-      email === adminEmail ? "Business Team" : "General Reader",
+      hasGodAccess(email) ? "Business Team" : "General Reader",
       now,
       now,
     )

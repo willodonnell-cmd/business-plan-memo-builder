@@ -22,7 +22,25 @@ export const memoSections = sqliteTable("memo_sections", {
   position: integer("position").notNull(),
   content: text("content").notNull().default(""),
   status: text("status", { enum: ["Draft", "Review", "Approval", "Approved"] }).notNull().default("Draft"),
+  currentVersionId: text("current_version_id"),
   updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+});
+
+export const memoSectionVersions = sqliteTable("memo_section_versions", {
+  id: text("id").primaryKey(),
+  planId: text("plan_id")
+    .notNull()
+    .references(() => businessPlans.id, { onDelete: "cascade" }),
+  sectionId: text("section_id")
+    .notNull()
+    .references(() => memoSections.id, { onDelete: "cascade" }),
+  content: text("content").notNull().default(""),
+  createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+  createdByEmail: text("created_by_email").notNull(),
+  createdByName: text("created_by_name").notNull(),
+  actionType: text("action_type", { enum: ["edit", "restore"] }).notNull().default("edit"),
+  sourceVersionId: text("source_version_id"),
+  note: text("note").notNull().default(""),
 });
 
 export const sectionQuestions = sqliteTable("section_questions", {

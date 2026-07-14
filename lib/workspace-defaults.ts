@@ -80,6 +80,19 @@ export type MemoSection = {
   avoid: string;
   content: string;
   status: SectionStatus;
+  versions?: MemoSectionVersion[];
+};
+
+export type MemoSectionVersion = {
+  id: string;
+  sectionId: string;
+  content: string;
+  createdAt: number;
+  createdByEmail: string;
+  createdByName: string;
+  actionType: "edit" | "restore";
+  sourceVersionId: string | null;
+  note: string;
 };
 
 export type Question = {

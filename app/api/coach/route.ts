@@ -10,6 +10,14 @@ type CoachRequest = {
   sectionAvoid?: string;
   sectionContent?: string;
   context?: string;
+  sections?: Array<{
+    title?: string;
+    prompt?: string;
+    format?: string;
+    emphasize?: string;
+    avoid?: string;
+    content?: string;
+  }>;
 };
 
 type OpenAIResponse = {
@@ -32,13 +40,25 @@ export async function POST(request: Request) {
     const sectionContent = clean(input.sectionContent) || "[No memo draft has been entered yet.]";
     const context = clean(input.context) || "[No additional context supplied.]";
 
-    if (!action || !sectionTitle) {
-      return Response.json({ error: "Missing coach action or section title." }, { status: 400 });
+    const fullReview = action === "Review the full memo";
+    if (!action || (!sectionTitle && !fullReview)) {
+      return Response.json({ error: "Missing coach action or document context." }, { status: 400 });
     }
+
+    const fullDocument = (input.sections ?? [])
+      .map((section, index) => [
+        `Section ${index + 1}: ${clean(section.title) || "Untitled"}`,
+        `Question / requirement: ${clean(section.prompt) || "Not supplied"}`,
+        clean(section.format) ? `Format: ${clean(section.format)}` : "",
+        clean(section.emphasize) ? `Must cover: ${clean(section.emphasize)}` : "",
+        clean(section.avoid) ? `Avoid: ${clean(section.avoid)}` : "",
+        `Entered response: ${clean(section.content) || "[Missing]"}`,
+      ].filter(Boolean).join("\n"))
+      .join("\n\n");
 
     const coachPrompt = [
       `Action: ${action}`,
-      `Section: ${sectionTitle}`,
+      `Section: ${sectionTitle || "Full memo"}`,
       "",
       "Section guidance:",
       sectionPrompt,
@@ -51,6 +71,7 @@ export async function POST(request: Request) {
       "",
       "Additional context:",
       context,
+      ...(fullReview ? ["", "Full document review input (read every guideline before evaluating the responses):", fullDocument || "[No sections supplied]"] : []),
     ]
       .filter(Boolean)
       .join("\n");
@@ -67,7 +88,7 @@ export async function POST(request: Request) {
           {
             role: "system",
             content:
-              "You are a concise business-plan coach for Prologis. Return practical coaching only. Do not invent facts, metrics, customers, financials, approvals, or internal Prologis details. If facts are missing, name the gap and ask for the specific data needed. Keep the response succinct and executive-oriented.",
+              "You are a concise business-plan coach for Prologis. Return practical coaching only. Do not invent facts, metrics, customers, financials, approvals, or internal Prologis details. If facts are missing, name the gap and ask for the specific data needed. Keep the response succinct and executive-oriented. For full-document review, read the guideline for every section first, then return only the sections that need changes as short bullets in this exact pattern: Section title — specific missing or weak item; concrete change needed. Do not restate the document. Limit to 8 bullets.",
           },
           {
             role: "user",

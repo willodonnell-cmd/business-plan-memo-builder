@@ -81,6 +81,50 @@ textarea:focus {
   box-shadow: none;
 }
 
+.coach-panel {
+  position: fixed;
+  z-index: 40;
+  top: 16px;
+  right: 16px;
+  bottom: 16px;
+  display: grid;
+  width: min(420px, calc(100vw - 32px));
+  grid-template-rows: auto minmax(0, 1fr);
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--card);
+  box-shadow: 0 18px 50px rgb(0 0 0 / 18%);
+  resize: horizontal;
+}
+
+.coach-panel-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  border-bottom: 1px solid var(--line);
+  padding: 16px 18px;
+}
+
+.coach-panel-header h2 {
+  margin: 0;
+  color: #24241f;
+  font-size: 1.25rem;
+  font-weight: 800;
+}
+
+.coach-panel-header p {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.coach-panel-content {
+  overflow: auto;
+  padding: 18px;
+}
+
 .brand-mark {
   width: 34px;
   height: 34px;
@@ -675,6 +719,170 @@ textarea:focus {
 
 .memo-read {
   white-space: pre-wrap;
+}
+
+.section-save-button {
+  min-height: 32px;
+  border: 1px solid var(--green);
+  border-radius: 6px;
+  background: var(--green);
+  color: #fff;
+  font-size: 0.82rem;
+  font-weight: 800;
+  padding: 0 12px;
+  white-space: nowrap;
+}
+
+.section-save-button:hover {
+  background: var(--green-dark);
+}
+
+.version-history {
+  margin-top: 12px;
+}
+
+.version-history-toggle {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fffdf8;
+  padding: 10px 12px;
+  text-align: left;
+}
+
+.version-history-toggle strong {
+  display: block;
+  color: #24241f;
+  font-size: 0.88rem;
+}
+
+.version-history-toggle small {
+  display: block;
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 0.76rem;
+}
+
+.version-history-toggle b {
+  color: var(--green-dark);
+  font-size: 0.78rem;
+}
+
+.version-history-panel {
+  border: 1px solid var(--line);
+  border-top: 0;
+  border-radius: 0 0 6px 6px;
+  background: #fffdf8;
+  padding: 12px;
+}
+
+.version-list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.version-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  border: 1px solid #ebe5d9;
+  border-radius: 6px;
+  background: #fffefb;
+  padding: 10px;
+}
+
+.version-item-main {
+  min-width: 0;
+}
+
+.version-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.version-meta strong {
+  color: #24241f;
+  font-size: 0.82rem;
+}
+
+.version-meta span,
+.version-item small,
+.version-preview-header span {
+  color: var(--muted);
+  font-size: 0.74rem;
+}
+
+.version-item p {
+  margin: 5px 0 0;
+  color: #4e4b43;
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+
+.version-actions {
+  display: flex;
+  align-items: start;
+  gap: 6px;
+}
+
+.version-actions button {
+  min-height: 28px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fffdf8;
+  color: var(--green-dark);
+  font-size: 0.76rem;
+  font-weight: 800;
+  padding: 0 9px;
+  white-space: nowrap;
+}
+
+.version-actions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.version-preview {
+  margin-top: 10px;
+  border: 1px solid #d8d3c7;
+  border-radius: 6px;
+  background: #fffefb;
+  padding: 12px;
+}
+
+.version-preview-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.version-preview p {
+  max-height: 220px;
+  overflow: auto;
+  margin: 0;
+  white-space: pre-wrap;
+  color: #363730;
+  font-size: 0.88rem;
+  line-height: 1.55;
+}
+
+.version-empty {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.84rem;
+  line-height: 1.5;
 }
 
 .small-status {
@@ -1831,6 +2039,16 @@ select.small-status {
 
   .headcount-prompt-grid {
     grid-template-columns: 1fr;
+  }
+
+  .coach-panel {
+    top: auto;
+    right: 8px;
+    bottom: 8px;
+    left: 8px;
+    width: auto;
+    height: min(52vh, 520px);
+    resize: vertical;
   }
 
   .role-context {

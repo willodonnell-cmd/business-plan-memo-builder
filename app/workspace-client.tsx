@@ -7,6 +7,7 @@ import {
   investmentCaseQuestions,
   investmentWorkbookProfiles,
 } from "../lib/workspace-defaults";
+import { hasGodAccess } from "../lib/access-control";
 import type {
   Approver,
   EnablementFunction,
@@ -15,6 +16,7 @@ import type {
   InvestmentRequestLine,
   InvestmentRequestType,
   InvestmentWorkbookProfile,
+  MemoSectionVersion,
   IssueType,
   MemoSection,
   Mode,
@@ -109,12 +111,13 @@ export function WorkspacePage({ audienceRole }: { audienceRole: Role }) {
   const [responseDrafts, setResponseDrafts] = useState<Record<string, string>>({});
   const [message, setMessage] = useState("Loading workspace...");
   const [showSavedToast, setShowSavedToast] = useState(false);
+  const [restoringVersionId, setRestoringVersionId] = useState("");
 
   const sections = plan?.sections ?? emptySections;
   const questions = plan?.questions ?? emptyQuestions;
   const approvers = plan?.approvers ?? emptyApprovers;
   const currentUser = plan?.user ?? null;
-  const role = audienceRole;
+  const role = currentUser && hasGodAccess(currentUser.email) ? "Business Team" : audienceRole;
   const isBusinessAudience = role === "Business Team";
   const isSharedForReview = plan?.approvalState !== "Draft";
   const canViewDocument = isBusinessAudience || isSharedForReview;
@@ -307,6 +310,39 @@ export function WorkspacePage({ audienceRole }: { audienceRole: Role }) {
       }),
     });
     applyPlan(nextPlan, "Status updated");
+  }
+
+  async function saveSection(section: MemoSection) {
+    if (!canEditMemo) return;
+    const nextPlan = await requestPlan(`/api/sections/${encodeURIComponent(section.id)}`, {
+      method: "PATCH",
+      body: JSON.stringify({
+        planId: activePlanId,
+        content: section.content,
+        status: section.status,
+      }),
+    });
+    applyPlan(nextPlan, "Section saved");
+  }
+
+  async function restoreVersion(section: MemoSection, version: MemoSectionVersion) {
+    if (!canEditMemo || restoringVersionId) return;
+    setRestoringVersionId(version.id);
+    try {
+      const nextPlan = await requestPlan(
+        `/api/sections/${encodeURIComponent(section.id)}/versions/${encodeURIComponent(version.id)}/restore`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            planId: activePlanId,
+            note: `Restored from version ${version.id}`,
+          }),
+        },
+      );
+      applyPlan(nextPlan, "Version restored");
+    } finally {
+      setRestoringVersionId("");
+    }
   }
 
   async function createInvestmentRequest(requestType: InvestmentRequestType) {
@@ -684,6 +720,11 @@ export function WorkspacePage({ audienceRole }: { audienceRole: Role }) {
                           {sections.filter((section) => section.content.trim()).length}/{sections.length} drafted
                         </span>
                       </div>
+                      {canEditMemo ? (
+                        <button className="section-save-button" type="button" onClick={() => void saveSection(activeSection)}>
+                          Save section
+                        </button>
+                      ) : null}
                     </div>
                     {canEditMemo ? (
                       <textarea
@@ -695,6 +736,14 @@ export function WorkspacePage({ audienceRole }: { audienceRole: Role }) {
                     ) : (
                       <div className="memo-read">{activeSection.content || "No draft content yet."}</div>
                     )}
+                    {canEditMemo ? (
+                      <VersionHistoryPanel
+                        key={activeSection.id}
+                        section={activeSection}
+                        restoringVersionId={restoringVersionId}
+                        onRestore={(version) => void restoreVersion(activeSection, version)}
+                      />
+                    ) : null}
                   </div>
 
                   <aside className="right-rail">
@@ -863,9 +912,9 @@ export function WorkspacePage({ audienceRole }: { audienceRole: Role }) {
       ) : null}
 
       {showCoach && activeSection ? (
-        <Modal title="Coach P" onClose={() => setShowCoach(false)}>
-          <CoachActions section={activeSection} />
-        </Modal>
+        <CoachPanel title="Coach P" onClose={() => setShowCoach(false)}>
+          <CoachActions section={activeSection} sections={sections} />
+        </CoachPanel>
       ) : null}
 
       {showHelp ? (
@@ -952,6 +1001,77 @@ function Guidance({ section }: { section: MemoSection }) {
         <li>{section.format}</li>
         <li>{section.emphasize}</li>
       </ul>
+    </div>
+  );
+}
+
+function VersionHistoryPanel({
+  section,
+  restoringVersionId,
+  onRestore,
+}: {
+  section: MemoSection;
+  restoringVersionId: string;
+  onRestore: (version: MemoSectionVersion) => void;
+}) {
+  const [isOpen, setIsOpen] = useState(false);
+  const [previewVersionId, setPreviewVersionId] = useState("");
+  const versions = section.versions ?? [];
+  const previewVersion = versions.find((version) => version.id === previewVersionId) ?? null;
+  return (
+    <div className="version-history">
+      <button className="version-history-toggle" type="button" onClick={() => setIsOpen((current) => !current)} aria-expanded={isOpen}>
+        <span>
+          <strong>Version history</strong>
+          <small>{versions.length ? `${versions.length} saved ${versions.length === 1 ? "version" : "versions"}` : "No saved versions yet"}</small>
+        </span>
+        <b>{isOpen ? "Collapse" : "Expand"}</b>
+      </button>
+      {isOpen ? (
+        <div className="version-history-panel">
+          {versions.length ? (
+            <>
+              <ol className="version-list">
+                {versions.map((version) => (
+                  <li key={version.id} className="version-item">
+                    <div className="version-item-main">
+                      <div className="version-meta">
+                        <strong>{version.actionType === "restore" ? "Restored" : "Edited"} by {version.createdByName}</strong>
+                        <span>{formatTimestamp(version.createdAt)}</span>
+                      </div>
+                      <p>{previewContent(version.content)}</p>
+                      {version.sourceVersionId ? <small>Source version: {shortVersionId(version.sourceVersionId)}</small> : null}
+                    </div>
+                    <div className="version-actions">
+                      <button type="button" onClick={() => setPreviewVersionId(previewVersionId === version.id ? "" : version.id)}>
+                        {previewVersionId === version.id ? "Hide" : "Open"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => onRestore(version)}
+                        disabled={restoringVersionId === version.id || version.content === section.content}
+                      >
+                        {restoringVersionId === version.id ? "Restoring..." : "Restore"}
+                      </button>
+                    </div>
+                  </li>
+                ))}
+              </ol>
+              {previewVersion ? (
+                <div className="version-preview">
+                  <div className="version-preview-header">
+                    <strong>Preview</strong>
+                    <span>{formatTimestamp(previewVersion.createdAt)}</span>
+                  </div>
+                  <p>{previewVersion.content || "Empty content."}</p>
+                </div>
+              ) : null}
+            </>
+          ) : (
+            <p className="version-empty">Save this section to start retaining field-level versions.</p>
+          )}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -1118,9 +1238,9 @@ function InvestmentRequestsWorkspace({
         />
         {error ? <div className="investment-error">{error}</div> : null}
         {showHeadCountGpt ? (
-          <Modal title="Head Count Request GPT" onClose={() => setShowHeadCountGpt(false)}>
+          <CoachPanel title="Head Count Request GPT" onClose={() => setShowHeadCountGpt(false)}>
             <HeadCountRequestGpt request={draft} />
-          </Modal>
+          </CoachPanel>
         ) : null}
         {!draft ? (
           <div className="investment-empty">
@@ -1232,9 +1352,9 @@ function HeadCountRequestGpt({ request }: { request: InvestmentRequest | null })
     setPromptPage((current) => ((current + 1) * 4 >= headCountPromptSuggestions.length ? 0 : current + 1));
   }
 
-  async function runHeadCountGpt() {
+  async function runHeadCountGpt(action: "prompt" | "review" = "prompt") {
     const nextPrompt = prompt.trim();
-    if (!nextPrompt || isWorking) return;
+    if ((action === "prompt" && !nextPrompt) || isWorking) return;
     setIsWorking(true);
     setError("");
     setResult("");
@@ -1243,7 +1363,8 @@ function HeadCountRequestGpt({ request }: { request: InvestmentRequest | null })
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
-          prompt: nextPrompt,
+          action,
+          prompt: action === "prompt" ? nextPrompt : undefined,
           requestContext: {
             initiative: request?.initiative,
             strategicObjective: request?.strategicObjective,
@@ -1290,6 +1411,9 @@ function HeadCountRequestGpt({ request }: { request: InvestmentRequest | null })
         </button>
         <button className="primary-button" disabled={!prompt.trim() || isWorking} onClick={() => void runHeadCountGpt()}>
           {isWorking ? "Drafting..." : "Draft"}
+        </button>
+        <button className="toolbar-button" disabled={!request || isWorking} onClick={() => void runHeadCountGpt("review")}>
+          {isWorking ? "Reviewing..." : "Review full request"}
         </button>
       </div>
       {error ? (
@@ -1860,12 +1984,28 @@ function Modal({ title, children, onClose }: { title: string; children: ReactNod
   );
 }
 
-function CoachActions({ section }: { section: MemoSection }) {
+function CoachPanel({ title, children, onClose }: { title: string; children: ReactNode; onClose: () => void }) {
+  return (
+    <aside className="coach-panel print:hidden" aria-label={title}>
+      <div className="coach-panel-header">
+        <div>
+          <h2>{title}</h2>
+          <p>Keep this panel open while editing.</p>
+        </div>
+        <button className="icon-button" title="Close" aria-label={`Close ${title}`} onClick={onClose}>×</button>
+      </div>
+      <div className="coach-panel-content">{children}</div>
+    </aside>
+  );
+}
+
+function CoachActions({ section, sections }: { section: MemoSection; sections: MemoSection[] }) {
   const [coachResult, setCoachResult] = useState("");
   const [coachError, setCoachError] = useState("");
   const [activeAction, setActiveAction] = useState("");
   const [isCoaching, setIsCoaching] = useState(false);
   const actions = [
+    "Create a prompt for this section",
     "Tighten this section",
     "Make this more executive-ready",
     "Find vague or unsupported claims",
@@ -1893,6 +2033,14 @@ function CoachActions({ section }: { section: MemoSection }) {
           sectionEmphasize: section.emphasize,
           sectionAvoid: section.avoid,
           sectionContent: section.content,
+          sections: action === "Review the full memo" ? sections.map((item) => ({
+            title: item.title,
+            prompt: item.prompt,
+            format: item.format,
+            emphasize: item.emphasize,
+            avoid: item.avoid,
+            content: item.content,
+          })) : undefined,
         }),
       });
       const payload = (await response.json()) as { result?: string; error?: string };
@@ -1910,9 +2058,12 @@ function CoachActions({ section }: { section: MemoSection }) {
   return (
     <div>
       <p className="text-sm leading-6 text-[#45413a]">
-        Coach actions are scoped to the current memo section. They should identify gaps or suggest placeholders when facts are missing; they must not invent business, customer, market, financial, or internal Prologis facts.
+        Create prompts or work on the current section. Full review reads every section guideline and draft, then reports only concise changes needed.
       </p>
       <div className="coach-action-grid">
+        <button className="primary-button" disabled={isCoaching} onClick={() => void runCoachAction("Review the full memo")}>
+          {isCoaching && activeAction === "Review the full memo" ? "Reviewing..." : "Review full memo"}
+        </button>
         {actions.map((action) => (
           <button key={action} className="toolbar-button" disabled={isCoaching} onClick={() => void runCoachAction(action)}>
             {isCoaching && activeAction === action ? "Working..." : action}
@@ -1950,6 +2101,26 @@ function sectionSubtitle(section: MemoSection) {
     return "Please hold off entering information until phase two. Use the Headcount button above to initiate the initial request.";
   }
   return section.prompt;
+}
+
+function formatTimestamp(value: number) {
+  return new Intl.DateTimeFormat(undefined, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(new Date(value));
+}
+
+function previewContent(value: string) {
+  const preview = value.trim().replace(/\s+/g, " ");
+  if (!preview) return "Empty content.";
+  return preview.length > 180 ? `${preview.slice(0, 177)}...` : preview;
+}
+
+function shortVersionId(value: string) {
+  return value.slice(0, 8);
 }
 
 function guidanceBullets(section: MemoSection) {

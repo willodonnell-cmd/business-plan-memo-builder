@@ -4,6 +4,7 @@ import { extractOpenAIText } from "../../../lib/openai-response";
 
 type HeadCountGptRequest = {
   prompt?: string;
+  action?: "prompt" | "review";
   requestContext?: {
     initiative?: string;
     strategicObjective?: string;
@@ -49,12 +50,13 @@ export async function POST(request: Request) {
   try {
     await getActorFromRequest(request);
     const input = (await request.json()) as HeadCountGptRequest;
+    const review = input.action === "review";
     const userPrompt = clean(input.prompt);
-    if (!userPrompt) {
+    if (!review && !userPrompt) {
       return Response.json({ error: "Enter the headcount request wording you want help with." }, { status: 400 });
     }
 
-    if (mentionsCompensationDetail(userPrompt)) {
+    if (!review && mentionsCompensationDetail(userPrompt)) {
       return Response.json({
         result:
           "Compensation details should stay in the restricted Excel or HR/FP&A process. I can help draft the business need, role support, timing, risk, or approval rationale.",
@@ -83,12 +85,13 @@ export async function POST(request: Request) {
               "Help users write one specific headcount request with short, clear, straightforward drafting support.",
               "Do not interview the user. Do not lead with questions. Respond only to the question asked.",
               "If clarification is absolutely necessary, ask at most one brief question, but prefer to answer directly.",
-              "Every answer must be 3 short sentences or fewer.",
+              "Every prompt-creation answer must be 3 short sentences or fewer.",
               "Return concise, ready-to-use text for an intake form. Do not provide long analysis.",
               "Stay inside headcount request drafting: business justification, why the role is needed, what it supports, impact if not approved, concise wording, and executive-ready language.",
               "Do not ask for or use salary, bonus, benefits, payroll tax, compensation tables, or other compensation-sensitive details.",
               "Do not replace HR review or approval. Do not replace Workday or Planful. Do not become a general business strategy assistant.",
               "Do not invent facts, metrics, approvals, customers, financials, or internal details.",
+              "For a full review, read every applicable question and its response before assessing it. Return only concise actionable bullets using: Field or role — specific missing or weak item; concrete change needed. Check business need, strategic objective, hiring timing, alternatives, measurable outcome, impact if declined, and each payroll/headcount role's title, purpose, timing, and rationale. Limit to 8 bullets and never restate the full request.",
             ].join(" "),
           },
           {
@@ -97,8 +100,8 @@ export async function POST(request: Request) {
               "Current non-sensitive request context:",
               context,
               "",
-              "User request:",
-              userPrompt,
+              review ? "Task: Review this full headcount request against the applicable intake requirements." : "User request:",
+              review ? "" : userPrompt,
             ].join("\n"),
           },
         ],
@@ -110,7 +113,8 @@ export async function POST(request: Request) {
       return Response.json({ error: payload.error?.message ?? "Head Count Request GPT request failed." }, { status: response.status });
     }
 
-    return Response.json({ result: trimToThreeSentences(extractOpenAIText(payload) || "No response was returned.") });
+    const result = extractOpenAIText(payload) || "No response was returned.";
+    return Response.json({ result: review ? result : trimToThreeSentences(result) });
   } catch (error) {
     return Response.json({ error: toRouteErrorMessage(error) }, { status: 500 });
   }
