@@ -119,15 +119,13 @@ export function WorkspacePage({ audienceRole }: { audienceRole: Role }) {
   const currentUser = plan?.user ?? null;
   const role = currentUser && hasGodAccess(currentUser.email) ? "Business Team" : audienceRole;
   const isBusinessAudience = role === "Business Team";
-  const isSharedForReview = plan?.approvalState !== "Draft";
-  const canViewDocument = isBusinessAudience || isSharedForReview;
+  // Temporary open-access posture: every authenticated workspace user can read
+  // every memo section while IT implements the backend security model.
+  const canViewDocument = true;
   const canEditMemo = isBusinessAudience && currentUser?.role === "Business Team";
   const canParticipate = canViewDocument && role !== "General Reader";
   const canSetApproval = canViewDocument && (role === "Business Team" || role === "Approver");
-  const visibleSections = useMemo(
-    () => (isBusinessAudience || isSharedForReview ? sections : []),
-    [isBusinessAudience, isSharedForReview, sections],
-  );
+  const visibleSections = sections;
   const activeSection = visibleSections.find((section) => section.id === activeId) ?? visibleSections[0] ?? null;
   const planTitle = plan?.title ?? "2027 Essentials Business Plan";
   const openQuestions = questions.filter((question) => isOpenQuestionStatus(question.status)).length;
