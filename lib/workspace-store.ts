@@ -1,5 +1,4 @@
 import { getD1 } from "../db";
-import { hasGodAccess } from "./access-control";
 import {
   DEFAULT_PLAN_ID,
   type ActivityEvent,
@@ -142,6 +141,7 @@ const allowedInvestmentRequestTypes = ["Payroll / Headcount", "Non-Payroll"] as 
 const allowedInvestmentRequestStatuses = ["Draft", "Submitted"] as const;
 const placeholderApproverNames = ["M. Rivera", "A. Chen", "S. Williams"];
 const adminEmail = "wodonnell@prologis.com";
+const unauthenticatedEmail = "open-access@prologis.local";
 const cleanMemoContentMarker = "2026-06-23-clean-memo-section-content";
 const cleanWorkflowTestDataMarker = "2026-06-24-clean-workflow-test-data";
 
@@ -172,7 +172,9 @@ export async function getActorFromRequest(request: Request): Promise<Actor> {
   return {
     email: identity.email,
     displayName: row?.display_name?.trim() || identity.displayName || displayNameFromEmail(identity.email),
-    role: hasGodAccess(identity.email)
+    // The workspace is shared: any platform-authenticated person can work in
+    // it as themselves. Missing authentication remains non-privileged.
+    role: identity.isAuthenticated
       ? "Business Team"
       : normalize(row?.role, allowedRoles, "General Reader"),
   };
@@ -188,9 +190,12 @@ export async function getWorkspacePlan(planIdInput?: string | null, actorInput?:
   await ensureSchema(d1);
   await ensureDefaultWorkstreams(d1);
   const actor = actorInput ?? {
-    email: adminEmail,
-    displayName: displayNameFromEmail(adminEmail),
-    role: "Business Team" as Role,
+    // This function is normally called from API routes with a resolved actor.
+    // Keep its defensive fallback non-privileged so a missed call site cannot
+    // silently impersonate the administrator.
+    email: unauthenticatedEmail,
+    displayName: displayNameFromEmail(unauthenticatedEmail),
+    role: "General Reader" as Role,
   };
 
   const plan = await d1
@@ -1460,9 +1465,6 @@ type Permission =
   | "investment_write";
 
 function assertCan(actor: Actor, permission: Permission) {
-  if (hasGodAccess(actor.email)) {
-    return;
-  }
   if (actor.role === "Business Team") {
     return;
   }
@@ -1515,7 +1517,7 @@ async function ensureUserProfile(d1: D1Database, email: string, displayName: str
     .bind(
       email,
       displayName,
-      hasGodAccess(email) ? "Business Team" : "General Reader",
+      "General Reader",
       now,
       now,
     )

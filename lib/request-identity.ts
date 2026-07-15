@@ -1,9 +1,9 @@
-const adminEmail = "wodonnell@prologis.com";
 const openAccessEmail = "open-access@prologis.local";
 
 export type RequestIdentity = {
   email: string;
   displayName: string;
+  isAuthenticated: boolean;
 };
 
 export function resolveActorIdentityFromRequest(request: Request): RequestIdentity {
@@ -13,10 +13,13 @@ export function resolveActorIdentityFromRequest(request: Request): RequestIdenti
     request.headers.get("x-authenticated-user-email");
   const email = normalizeEmail(headerEmail);
   if (!email) {
-    const fallbackEmail = isLocalRequest(request) ? adminEmail : openAccessEmail;
     return {
-      email: fallbackEmail,
-      displayName: displayNameFromEmail(fallbackEmail),
+      // Never assign an authenticated user's identity when the platform did not
+      // provide one. In particular, local development must not impersonate an
+      // administrator because that would grant their permissions to every user.
+      email: openAccessEmail,
+      displayName: displayNameFromEmail(openAccessEmail),
+      isAuthenticated: false,
     };
   }
 
@@ -24,6 +27,7 @@ export function resolveActorIdentityFromRequest(request: Request): RequestIdenti
   return {
     email,
     displayName: fullName ?? displayNameFromEmail(email),
+    isAuthenticated: true,
   };
 }
 
@@ -63,9 +67,4 @@ function displayNameFromAuthHeaders(headers: Headers) {
   } catch {
     return null;
   }
-}
-
-function isLocalRequest(request: Request) {
-  const hostname = new URL(request.url).hostname;
-  return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "0.0.0.0" || hostname.endsWith(".local");
 }

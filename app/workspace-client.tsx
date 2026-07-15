@@ -7,7 +7,6 @@ import {
   investmentCaseQuestions,
   investmentWorkbookProfiles,
 } from "../lib/workspace-defaults";
-import { hasGodAccess } from "../lib/access-control";
 import type {
   Approver,
   EnablementFunction,
@@ -117,7 +116,7 @@ export function WorkspacePage({ audienceRole }: { audienceRole: Role }) {
   const questions = plan?.questions ?? emptyQuestions;
   const approvers = plan?.approvers ?? emptyApprovers;
   const currentUser = plan?.user ?? null;
-  const role = currentUser && hasGodAccess(currentUser.email) ? "Business Team" : audienceRole;
+  const role = currentUser?.role === "Business Team" ? "Business Team" : audienceRole;
   const isBusinessAudience = role === "Business Team";
   // Temporary open-access posture: every authenticated workspace user can read
   // every memo section while IT implements the backend security model.
