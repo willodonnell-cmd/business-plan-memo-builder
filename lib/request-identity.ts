@@ -1,4 +1,5 @@
 const adminEmail = "wodonnell@prologis.com";
+const openAccessEmail = "open-access@prologis.local";
 
 export type RequestIdentity = {
   email: string;
@@ -12,13 +13,11 @@ export function resolveActorIdentityFromRequest(request: Request): RequestIdenti
     request.headers.get("x-authenticated-user-email");
   const email = normalizeEmail(headerEmail);
   if (!email) {
-    if (isLocalRequest(request)) {
-      return {
-        email: adminEmail,
-        displayName: displayNameFromEmail(adminEmail),
-      };
-    }
-    throw new Error("Authenticated user email is required.");
+    const fallbackEmail = isLocalRequest(request) ? adminEmail : openAccessEmail;
+    return {
+      email: fallbackEmail,
+      displayName: displayNameFromEmail(fallbackEmail),
+    };
   }
 
   const fullName = displayNameFromAuthHeaders(request.headers);
