@@ -1,4 +1,5 @@
 const openAccessEmail = "open-access@prologis.local";
+const localBusinessTeamEmail = "local-business-team@prologis.local";
 
 export type RequestIdentity = {
   email: string;
@@ -13,6 +14,13 @@ export function resolveActorIdentityFromRequest(request: Request): RequestIdenti
     request.headers.get("x-authenticated-user-email");
   const email = normalizeEmail(headerEmail);
   if (!email) {
+    if (isLocalDevelopmentRequest(request)) {
+      return {
+        email: localBusinessTeamEmail,
+        displayName: "Local Business Team",
+        isAuthenticated: true,
+      };
+    }
     return {
       // Never assign an authenticated user's identity when the platform did not
       // provide one. In particular, local development must not impersonate an
@@ -29,6 +37,14 @@ export function resolveActorIdentityFromRequest(request: Request): RequestIdenti
     displayName: fullName ?? displayNameFromEmail(email),
     isAuthenticated: true,
   };
+}
+
+function isLocalDevelopmentRequest(request: Request) {
+  try {
+    return ["localhost", "127.0.0.1", "::1"].includes(new URL(request.url).hostname);
+  } catch {
+    return false;
+  }
 }
 
 export function displayNameFromEmail(email: string) {

@@ -10,6 +10,7 @@
     "build": "vinext build",
     "start": "vinext start",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
+    "test:headcount": "tsx --test tests/headcount-nathalie.test.ts tests/headcount-needs-summary.test.ts tests/payroll-workbook-export.test.ts tests/request-identity.test.ts",
     "db:generate": "drizzle-kit generate"
   },
   "dependencies": {
