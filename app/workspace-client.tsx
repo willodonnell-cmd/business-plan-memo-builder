@@ -8,7 +8,6 @@ import {
   investmentWorkbookProfiles,
 } from "../lib/workspace-defaults";
 import { headcountFieldDefinitions, type HeadcountField, type HeadcountPromptAction } from "../lib/headcount-prompts";
-import { headcountExecutiveSummary } from "../lib/headcount-summary";
 import type {
   Approver,
   EnablementFunction,
@@ -39,6 +38,7 @@ type ApiInvestmentResponse = {
   request?: InvestmentRequest;
   requests?: InvestmentRequest[];
   export?: InvestmentRequestExport;
+  deletedId?: string;
   error?: string;
 };
 
@@ -75,16 +75,6 @@ type PrivateHeadcountDraft = { baseUpdatedAt: number; savedAt: number; request: 
 
 function privateDraftKey(requestId: string) {
   return `${privateDraftStoragePrefix}:${requestId}`;
-}
-
-function readPrivateHeadcountDraft(request: InvestmentRequest | null) {
-  if (!request || request.requestType !== "Payroll / Headcount" || typeof window === "undefined") return null;
-  try {
-    const saved = JSON.parse(window.localStorage.getItem(privateDraftKey(request.id)) ?? "null") as PrivateHeadcountDraft | null;
-    return saved?.request && typeof saved.baseUpdatedAt === "number" ? saved : null;
-  } catch {
-    return null;
-  }
 }
 
 function isOpenQuestionStatus(status: QuestionStatus) {
@@ -219,7 +209,12 @@ export function WorkspacePage({ audienceRole }: { audienceRole: Role }) {
       );
     }
     if (payload.request) {
+      setInvestmentRequests((current) => [payload.request as InvestmentRequest, ...current.filter((request) => request.id !== payload.request?.id)]);
       setActiveInvestmentId(payload.request.id);
+    }
+    if (payload.deletedId) {
+      setInvestmentRequests((current) => current.filter((request) => request.id !== payload.deletedId));
+      setActiveInvestmentId((current) => (current === payload.deletedId ? "" : current));
     }
     if (payload.export) {
       setInvestmentExport(payload.export);
@@ -386,27 +381,13 @@ export function WorkspacePage({ audienceRole }: { audienceRole: Role }) {
     }
   }
 
-  async function archiveInvestmentRequest(request: InvestmentRequest, archived: boolean) {
-    try {
-      const payload = await requestInvestments(`/api/investment-requests/${encodeURIComponent(request.id)}`, {
-        method: "PATCH",
-        body: JSON.stringify({ planId: activePlanId, archived, expectedUpdatedAt: request.updatedAt }),
-      });
-      setInvestmentExport(null);
-      if (payload.request) setActiveInvestmentId(payload.request.id);
-      setShowSavedToast(true);
-      return true;
-    } catch {
-      return false;
-    }
-  }
-
   async function loadInvestmentExport(request: InvestmentRequest) {
     try {
       const query = new URLSearchParams({ planId: activePlanId });
       await requestInvestments(`/api/investment-requests/${encodeURIComponent(request.id)}/export?${query.toString()}`);
+      return true;
     } catch {
-      return;
+      return false;
     }
   }
 
@@ -432,21 +413,23 @@ export function WorkspacePage({ audienceRole }: { audienceRole: Role }) {
       link.remove();
       window.URL.revokeObjectURL(url);
       setMessage("Workbook generated");
+      return true;
     } catch (error) {
       const message = error instanceof Error ? error.message : "Excel export could not be completed. No data was changed.";
       setMessage(message);
       setInvestmentError(message);
+      return false;
     }
   }
 
   async function deleteInvestmentRequest(request: InvestmentRequest) {
     try {
       const query = new URLSearchParams({ planId: activePlanId });
-      const payload = await requestInvestments(`/api/investment-requests/${encodeURIComponent(request.id)}?${query.toString()}`, {
+      await requestInvestments(`/api/investment-requests/${encodeURIComponent(request.id)}?${query.toString()}`, {
         method: "DELETE",
       });
       setInvestmentExport(null);
-      setActiveInvestmentId((current) => (current === request.id ? payload.requests?.[0]?.id ?? "" : current));
+      setActiveInvestmentId((current) => current || (investmentRequests.find((item) => item.id !== request.id)?.id ?? ""));
       setShowSavedToast(true);
     } catch {
       return;
@@ -715,7 +698,6 @@ export function WorkspacePage({ audienceRole }: { audienceRole: Role }) {
             onExport={loadInvestmentExport}
             onDownload={downloadInvestmentWorkbook}
             onDelete={deleteInvestmentRequest}
-            onArchive={archiveInvestmentRequest}
           />
         ) : mode === "Section" ? (
           <div className="section-layout">
@@ -1278,7 +1260,6 @@ function InvestmentRequestsWorkspace({
   onExport,
   onDownload,
   onDelete,
-  onArchive,
 }: {
   profile: InvestmentWorkbookProfile | null;
   requests: InvestmentRequest[];
@@ -1292,22 +1273,20 @@ function InvestmentRequestsWorkspace({
   onCreate: (requestType: InvestmentRequestType) => Promise<void>;
   onSave: (request: InvestmentRequest) => Promise<boolean>;
   onSubmit: (request: InvestmentRequest) => Promise<boolean>;
-  onExport: (request: InvestmentRequest) => Promise<void>;
-  onDownload: (request: InvestmentRequest) => Promise<void>;
+  onExport: (request: InvestmentRequest) => Promise<boolean>;
+  onDownload: (request: InvestmentRequest) => Promise<boolean>;
   onDelete: (request: InvestmentRequest) => Promise<void>;
-  onArchive: (request: InvestmentRequest, archived: boolean) => Promise<boolean>;
 }) {
   const [draft, setDraft] = useState<InvestmentRequest | null>(activeRequest);
   const [draftRequestId, setDraftRequestId] = useState(activeRequest?.id ?? "");
-  const [privateDraft, setPrivateDraft] = useState<PrivateHeadcountDraft | null>(() => readPrivateHeadcountDraft(activeRequest));
   const [isDirty, setIsDirty] = useState(false);
   const [showHeadCountGpt, setShowHeadCountGpt] = useState(false);
-  const [selectedHeadcountField, setSelectedHeadcountField] = useState<HeadcountField>("strategicObjective");
+  const [selectedHeadcountField] = useState<HeadcountField>("strategicObjective");
+  const [pendingAction, setPendingAction] = useState<"save" | "submit" | "archive" | "restore" | "preview" | "download" | "delete" | null>(null);
 
   if ((activeRequest?.id ?? "") !== draftRequestId) {
     setDraftRequestId(activeRequest?.id ?? "");
     setDraft(activeRequest);
-    setPrivateDraft(readPrivateHeadcountDraft(activeRequest));
     setIsDirty(false);
   }
 
@@ -1386,11 +1365,45 @@ function InvestmentRequestsWorkspace({
 
   async function saveCurrentDraft(submit = false) {
     if (!draft) return;
-    const saved = await (submit ? onSubmit(draft) : onSave(draft));
-    if (saved && draft.requestType === "Payroll / Headcount") {
-      window.localStorage.removeItem(privateDraftKey(draft.id));
-      setPrivateDraft(null);
-      setIsDirty(false);
+    const action = submit ? "submit" : "save";
+    setPendingAction(action);
+    try {
+      const saved = await (submit ? onSubmit(draft) : onSave(draft));
+      if (saved && draft.requestType === "Payroll / Headcount") {
+        window.localStorage.removeItem(privateDraftKey(draft.id));
+        setIsDirty(false);
+      }
+    } finally {
+      setPendingAction(null);
+    }
+  }
+
+  async function previewExport() {
+    if (!draft) return;
+    setPendingAction("preview");
+    try {
+      await onExport(draft);
+    } finally {
+      setPendingAction(null);
+    }
+  }
+
+  async function downloadWorkbook() {
+    if (!draft) return;
+    setPendingAction("download");
+    try {
+      await onDownload(draft);
+    } finally {
+      setPendingAction(null);
+    }
+  }
+
+  async function deleteRequest(request: InvestmentRequest) {
+    setPendingAction("delete");
+    try {
+      await onDelete(request);
+    } finally {
+      setPendingAction(null);
     }
   }
 
@@ -1409,10 +1422,10 @@ function InvestmentRequestsWorkspace({
           aria-label="Search Headcount requests"
         />
         <div className="investment-create-row">
-          <button className="primary-button" disabled={!canEdit} onClick={() => void onCreate("Payroll / Headcount")}>
+          <button className="primary-button" disabled={!canEdit || pendingAction !== null} onClick={() => void onCreate("Payroll / Headcount")}>
             Create New Headcount
           </button>
-          <button className="toolbar-button" disabled={!canEdit} onClick={() => void onCreate("Non-Payroll")}>
+          <button className="toolbar-button" disabled={!canEdit || pendingAction !== null} onClick={() => void onCreate("Non-Payroll")}>
             Create New Non-Payroll
           </button>
         </div>
@@ -1437,11 +1450,11 @@ function InvestmentRequestsWorkspace({
                 type="button"
                 title="Delete request"
                 aria-label={`Delete ${request.initiative || "untitled investment request"}`}
-                disabled={!canEdit}
+                disabled={!canEdit || pendingAction !== null}
                 onClick={(event) => {
                   event.stopPropagation();
                   if (window.confirm("Delete this investment request? This removes it from the system.")) {
-                    void onDelete(request);
+                    void deleteRequest(request);
                   }
                 }}
               >
@@ -1458,13 +1471,13 @@ function InvestmentRequestsWorkspace({
         <button
           className="headcount-help-avatar-button investment-panel-help"
           type="button"
-          aria-label="Open Head Count Request GPT"
-          title="Open Head Count Request GPT"
+          aria-label="Open Nathaalie"
+          title="Open Nathaalie"
           onClick={() => setShowHeadCountGpt(true)}
         />
         {error ? <div className="investment-error">{error}</div> : null}
         {showHeadCountGpt ? (
-          <CoachPanel title="Nathalie" onClose={() => setShowHeadCountGpt(false)}>
+          <CoachPanel title="Nathaalie" onClose={() => setShowHeadCountGpt(false)}>
             <HeadCountRequestGpt request={draft} field={selectedHeadcountField} onUpdateDraft={updateDraft} />
           </CoachPanel>
         ) : null}
@@ -1476,15 +1489,6 @@ function InvestmentRequestsWorkspace({
           </div>
         ) : (
           <>
-            {draft.requestType === "Payroll / Headcount" && privateDraft ? (
-              <div className="mb-4 rounded-lg border border-[#d9d5ca] bg-[#fbfaf6] p-3 text-sm">
-                {privateDraft.baseUpdatedAt === draft.updatedAt ? (
-                  <><strong>Private unsaved draft available.</strong><p className="mt-1">Only this browser can recover it. It has not changed the shared request.</p><div className="mt-2 flex gap-2"><button className="toolbar-button" type="button" onClick={() => { setDraft(privateDraft.request); setPrivateDraft(null); setIsDirty(true); }}>Restore private draft</button><button className="toolbar-button" type="button" onClick={() => { window.localStorage.removeItem(privateDraftKey(draft.id)); setPrivateDraft(null); }}>Discard</button></div></>
-                ) : (
-                  <><strong>Private draft needs review.</strong><p className="mt-1">The shared request changed after this browser saved a private draft. Reload or discard the private copy before saving.</p><button className="toolbar-button mt-2" type="button" onClick={() => { window.localStorage.removeItem(privateDraftKey(draft.id)); setPrivateDraft(null); }}>Discard private copy</button></>
-                )}
-              </div>
-            ) : null}
             {draft.archivedAt ? <div className="mb-4 rounded-lg bg-[#fff3e7] p-3 text-sm text-[#5f3c1c]">This headcount request is archived and excluded from summary generation until restored.</div> : null}
             <div className="investment-header">
               <div>
@@ -1497,24 +1501,22 @@ function InvestmentRequestsWorkspace({
                 </span>
                 <div className="investment-action-area">
                   <div className="investment-button-grid">
-                    <button className="toolbar-button" disabled={!canEdit || Boolean(draft.archivedAt)} onClick={() => void saveCurrentDraft()}>
+                    <button className="toolbar-button" disabled={!canEdit || Boolean(draft.archivedAt) || pendingAction !== null} onClick={() => void saveCurrentDraft()}>
                       Save Draft
                     </button>
-                    <button className="toolbar-button toolbar-button-green" disabled={!canEdit || Boolean(draft.archivedAt)} onClick={() => void saveCurrentDraft(true)}>
+                    <button className="toolbar-button toolbar-button-green" disabled={!canEdit || Boolean(draft.archivedAt) || pendingAction !== null} onClick={() => void saveCurrentDraft(true)}>
                       Submit
                     </button>
-                    {draft.requestType === "Payroll / Headcount" ? <button className="toolbar-button" disabled={!canEdit} onClick={() => void onArchive(draft, !draft.archivedAt)}>{draft.archivedAt ? "Restore request" : "Archive request"}</button> : null}
-                    <button className="toolbar-button" onClick={() => draft && void onExport(draft)}>
-                      Export Preview
+                    <button className="toolbar-button" disabled={pendingAction !== null} onClick={() => void previewExport()}>
+                      Preview All
                     </button>
-                    <button className="toolbar-button toolbar-button-green" onClick={() => draft && void onDownload(draft)}>
-                      Download All Headcount Requests
+                    <button className="toolbar-button toolbar-button-green" disabled={pendingAction !== null} onClick={() => void downloadWorkbook()}>
+                      Download All
                     </button>
                   </div>
                 </div>
               </div>
             </div>
-
             <div className="investment-form-grid">
               <label>
                 <span>Owner</span>
@@ -1528,12 +1530,6 @@ function InvestmentRequestsWorkspace({
                 <span>Title</span>
                 <input value={draft.initiative} onChange={(event) => updateDraft({ initiative: event.target.value })} disabled={!canEdit || Boolean(draft.archivedAt)} />
               </label>
-              {draft.requestType === "Payroll / Headcount" ? (
-                <label>
-                  <span>Requested positions</span>
-                  <input type="number" min="1" step="1" value={draft.quantity} onChange={(event) => updateDraft({ quantity: Number(event.target.value) || 1 })} disabled={!canEdit || Boolean(draft.archivedAt)} />
-                </label>
-              ) : null}
             </div>
 
             <div className="investment-question-grid">
@@ -1541,14 +1537,6 @@ function InvestmentRequestsWorkspace({
                 <label key={question.key}>
                   <span>{question.question}</span>
                   <small>{question.guidance}</small>
-                  {draft.requestType === "Payroll / Headcount" ? (
-                    <button className="reply-button" type="button" disabled={!canEdit || Boolean(draft.archivedAt)} onClick={() => {
-                      setSelectedHeadcountField(question.key);
-                      setShowHeadCountGpt(true);
-                    }}>
-                      Ask Nathalie
-                    </button>
-                  ) : null}
                   <textarea
                     value={String(draft[question.key] ?? "")}
                     onChange={(event) => updateDraft({ [question.key]: event.target.value } as Partial<InvestmentRequest>)}
@@ -1583,7 +1571,7 @@ function InvestmentRequestsWorkspace({
               ))}
             </div>
 
-            <InvestmentSummary request={draft} />
+            {draft.requestType !== "Payroll / Headcount" ? <InvestmentSummary request={draft} /> : null}
             {draft.requestType === "Payroll / Headcount" ? <p className="investment-sensitive-note">This export includes the available role and business-rationale information. Compensation and payroll assumptions must be entered directly into the Excel workbook.</p> : null}
             {exportPreview ? <InvestmentExportPreview preview={exportPreview} /> : null}
           </>
@@ -1628,11 +1616,11 @@ function HeadCountRequestGpt({ request, field, onUpdateDraft }: { request: Inves
       });
       const payload = (await response.json()) as { result?: string; error?: string };
       if (!response.ok || !payload.result) {
-        throw new Error(payload.error ?? "Nathalie could not complete this request.");
+        throw new Error(payload.error ?? "Nathaalie could not complete this request.");
       }
       setResult(payload.result);
     } catch {
-      setError("Nathalie could not complete this request. Your existing response has not been changed.");
+      setError("Nathaalie could not complete this request. Your existing response has not been changed.");
     } finally {
       setIsWorking(false);
     }
@@ -1829,21 +1817,14 @@ function SelectField({
 
 function InvestmentSummary({ request }: { request: InvestmentRequest }) {
   const total = request.lines.reduce((sum, line) => sum + (line.annualizedSpend ?? 0), 0);
-  const amountMetric =
-    request.requestType === "Payroll / Headcount"
-      ? "Completed in restricted Excel"
-      : formatCurrency(total);
-  const summary = request.requestType === "Payroll / Headcount" ? headcountExecutiveSummary(request) : "";
   return (
     <section className="investment-summary">
       <p className="eyebrow">Executive summary</p>
-      {request.requestType === "Payroll / Headcount" ? <p>{summary}</p> : <>
-        <p>{request.ownerName || "The business owner"} is requesting {request.requestType.toLowerCase()} investment for {request.initiative || "an unnamed title"}. The request supports {request.strategicObjective || "a strategic objective not yet specified"} and is tied to {request.milestone || "a milestone not yet specified"}.</p>
-        <p>Expected outcome: {request.measurableOutcome || "not specified"}. If not approved: {request.notApprovedImpact || "not specified"}.</p>
-      </>}
+      <p>{request.ownerName || "The business owner"} is requesting {request.requestType.toLowerCase()} investment for {request.initiative || "an unnamed title"}. The request supports {request.strategicObjective || "a strategic objective not yet specified"} and is tied to {request.milestone || "a milestone not yet specified"}.</p>
+      <p>Expected outcome: {request.measurableOutcome || "not specified"}. If not approved: {request.notApprovedImpact || "not specified"}.</p>
       <div className="investment-summary-metrics">
         <Metric label="Rows" value={`${request.lines.length}`} />
-        <Metric label={request.requestType === "Payroll / Headcount" ? "Compensation detail" : "Input amount"} value={amountMetric} />
+        <Metric label="Input amount" value={formatCurrency(total)} />
         <Metric label="Status" value={request.status} />
       </div>
     </section>

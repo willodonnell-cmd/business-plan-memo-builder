@@ -31,7 +31,6 @@ export async function POST(request: Request) {
     const created = await createInvestmentRequest(input, actor);
     return Response.json({
       request: created,
-      requests: await getInvestmentRequests(input.planId),
     });
   } catch (error) {
     const message = toRouteErrorMessage(error);

@@ -771,20 +771,26 @@ export async function getInvestmentRequests(planIdInput?: string | null, searchI
     .all<InvestmentRequestRow>();
 
   const ids = (requests.results ?? []).map((request) => request.id);
-  const lineRows: InvestmentRequestLineRow[] = [];
-  for (const id of ids) {
-    const rows = await d1
-      .prepare(
-        "SELECT id, request_id, line_type, position, line_data FROM investment_request_lines WHERE request_id = ? ORDER BY position ASC",
-      )
-      .bind(id)
-      .all<InvestmentRequestLineRow>();
-    lineRows.push(...(rows.results ?? []));
+  const lineRows = ids.length
+    ? (
+        await d1
+          .prepare(
+            `SELECT id, request_id, line_type, position, line_data FROM investment_request_lines WHERE request_id IN (${ids.map(() => "?").join(", ")}) ORDER BY request_id ASC, position ASC`,
+          )
+          .bind(...ids)
+          .all<InvestmentRequestLineRow>()
+      ).results ?? []
+    : [];
+  const linesByRequestId = new Map<string, InvestmentRequestLineRow[]>();
+  for (const line of lineRows) {
+    const requestLines = linesByRequestId.get(line.request_id) ?? [];
+    requestLines.push(line);
+    linesByRequestId.set(line.request_id, requestLines);
   }
 
   const search = searchInput?.trim().toLowerCase() ?? "";
   return (requests.results ?? [])
-    .map((request) => toInvestmentRequest(request, lineRows.filter((line) => line.request_id === request.id)))
+    .map((request) => toInvestmentRequest(request, linesByRequestId.get(request.id) ?? []))
     .filter((request) => !search || investmentRequestMatchesSearch(request, search));
 }
 
@@ -1205,7 +1211,22 @@ function toTsv(headers: string[], rows: Array<Array<string | number>>) {
   return [headers, ...rows].map((row) => row.map((cell) => String(cell ?? "").replace(/\t|\r?\n/g, " ")).join("\t")).join("\n");
 }
 
+const schemaReadyByDatabase = new WeakMap<object, Promise<void>>();
+
 async function ensureSchema(d1: D1Database) {
+  const key = d1 as object;
+  let ready = schemaReadyByDatabase.get(key);
+  if (!ready) {
+    ready = ensureSchemaOnce(d1).catch((error) => {
+      schemaReadyByDatabase.delete(key);
+      throw error;
+    });
+    schemaReadyByDatabase.set(key, ready);
+  }
+  return ready;
+}
+
+async function ensureSchemaOnce(d1: D1Database) {
   const statements = [
     "CREATE TABLE IF NOT EXISTS business_plans (id text PRIMARY KEY NOT NULL, title text NOT NULL, team_name text NOT NULL, approval_state text DEFAULT 'Draft' NOT NULL, approval_posture text DEFAULT 'Drafting' NOT NULL, created_by text, updated_at integer NOT NULL)",
     "CREATE TABLE IF NOT EXISTS memo_sections (id text PRIMARY KEY NOT NULL, plan_id text NOT NULL, section_key text NOT NULL, title text NOT NULL, position integer NOT NULL, requirement text DEFAULT '' NOT NULL, content text DEFAULT '' NOT NULL, status text DEFAULT 'Draft' NOT NULL, current_version_id text, updated_at integer NOT NULL, FOREIGN KEY (plan_id) REFERENCES business_plans(id) ON DELETE cascade)",
