@@ -11,6 +11,8 @@ import {
   type InvestmentRequestLine,
   type InvestmentRequestStatus,
   type InvestmentRequestType,
+  type HeadcountSummarySnapshot,
+  type HeadcountSummaryState,
   type IssueType,
   type MemoSectionVersion,
   type Question,
@@ -27,6 +29,7 @@ import {
   sectionDefaults,
 } from "./workspace-defaults";
 import { cleanDisplayName, displayNameFromEmail, normalizeEmail, resolveActorIdentityFromRequest } from "./request-identity";
+import { buildHeadcountNeedsSummary, headcountRequestFingerprint, validateHeadcountRequest } from "./headcount-needs-summary";
 
 type BusinessPlanRow = {
   id: string;
@@ -52,7 +55,7 @@ type SectionVersionRow = {
   created_at: number;
   created_by_email: string;
   created_by_name: string;
-  action_type: "edit" | "restore";
+  action_type: "edit" | "restore" | "headcount_summary";
   source_version_id: string | null;
   note: string | null;
 };
@@ -109,9 +112,24 @@ type InvestmentRequestRow = {
   alternatives: string;
   measurable_outcome: string;
   not_approved_impact: string;
+  quantity: number;
   created_at: number;
   updated_at: number;
   submitted_at: number | null;
+  archived_at: number | null;
+};
+
+type HeadcountSummarySnapshotRow = {
+  id: string;
+  section_id: string;
+  section_version_id: string;
+  generated_at: number;
+  generated_by_email: string;
+  generated_by_name: string;
+  summary: string;
+  request_count: number;
+  total_positions: number;
+  request_snapshot: string;
 };
 
 type InvestmentRequestLineRow = {
@@ -254,6 +272,10 @@ export async function getWorkspacePlan(planIdInput?: string | null, actorInput?:
     currentVersions.push(toSectionVersion(version));
     versionsBySection.set(version.section_id, currentVersions);
   }
+  const headcountSection = (sections.results ?? []).find((section) => section.section_key === "headcount");
+  const headcountSummary = actor.role === "Business Team" && headcountSection
+    ? await getHeadcountSummarySnapshot(d1, planId, headcountSection.id)
+    : null;
 
   return {
     id: plan.id,
@@ -281,6 +303,7 @@ export async function getWorkspacePlan(planIdInput?: string | null, actorInput?:
     approvers: (approvers.results ?? []).map(toApprover),
     groups: (groups.results ?? []).map(toGroup),
     activity: (activity.results ?? []).map(toActivityEvent),
+    ...(actor.role === "Business Team" ? { headcountSummary } : {}),
   };
 }
 
@@ -742,7 +765,7 @@ export async function getInvestmentRequests(planIdInput?: string | null, searchI
 
   const requests = await d1
     .prepare(
-      "SELECT id, plan_id, request_type, status, owner_name, owner_email, initiative, strategic_objective, milestone, alternatives, measurable_outcome, not_approved_impact, created_at, updated_at, submitted_at FROM investment_requests WHERE plan_id = ? ORDER BY updated_at DESC",
+      "SELECT id, plan_id, request_type, status, owner_name, owner_email, initiative, strategic_objective, milestone, alternatives, measurable_outcome, not_approved_impact, quantity, created_at, updated_at, submitted_at, archived_at FROM investment_requests WHERE plan_id = ? ORDER BY updated_at DESC",
     )
     .bind(planId)
     .all<InvestmentRequestRow>();
@@ -765,6 +788,71 @@ export async function getInvestmentRequests(planIdInput?: string | null, searchI
     .filter((request) => !search || investmentRequestMatchesSearch(request, search));
 }
 
+export async function getHeadcountSummaryReadiness(planIdInput: string | null | undefined, actor: Actor) {
+  assertCan(actor, "edit_memo");
+  const planId = resolvePlanId(planIdInput);
+  const requests = (await getInvestmentRequests(planId)).filter((request) => request.requestType === "Payroll / Headcount" && request.archivedAt == null);
+  const completion = requests.map(validateHeadcountRequest);
+  return { requests, completion, ready: requests.length > 0 && completion.every((item) => item.complete) };
+}
+
+export async function generateHeadcountNeedsPreview(planIdInput: string | null | undefined, actor: Actor) {
+  const { requests, ready } = await getHeadcountSummaryReadiness(planIdInput, actor);
+  if (!requests.length) throw new Error("Create at least one active headcount request before generating a summary.");
+  if (!ready) throw new Error("Complete every active headcount request before generating a summary.");
+  return buildHeadcountNeedsSummary(requests);
+}
+
+export async function replaceHeadcountNeedsWithSummary(
+  planIdInput: string | null | undefined,
+  summary: string,
+  actor: Actor,
+) {
+  assertCan(actor, "edit_memo");
+  const planId = resolvePlanId(planIdInput);
+  const { requests, completion, ready } = await getHeadcountSummaryReadiness(planId, actor);
+  if (!summary.trim()) throw new Error("A generated Headcount Needs summary is required.");
+  if (!ready) throw new Error("Complete every active headcount request before replacing the Headcount Needs draft.");
+  const d1 = getD1();
+  await ensureSchema(d1);
+  const section = await d1
+    .prepare("SELECT id, content, status, current_version_id FROM memo_sections WHERE plan_id = ? AND section_key = 'headcount'")
+    .bind(planId)
+    .first<{ id: string; content: string; status: SectionStatus; current_version_id: string | null }>();
+  if (!section) throw new Error("Headcount Needs section not found.");
+  const generated = buildHeadcountNeedsSummary(requests);
+  if (summary.trim() !== generated.summary) {
+    throw new Error("Headcount requests changed. Regenerate the preview before replacing the draft.");
+  }
+  const now = Date.now();
+  await ensureCurrentSectionVersion(d1, planId, section.id, section.content, section.status, now);
+  const versionId = await createSectionVersion(d1, {
+    planId,
+    sectionId: section.id,
+    content: generated.summary,
+    actor,
+    actionType: "headcount_summary",
+    sourceVersionId: section.current_version_id,
+    note: "Generated from active completed headcount requests.",
+    now,
+  });
+  const snapshotId = crypto.randomUUID();
+  const snapshotRequests = requests.map((request) => ({
+    id: request.id,
+    title: request.initiative,
+    quantity: request.quantity,
+    fingerprint: headcountRequestFingerprint(request),
+    active: true,
+  }));
+  await d1.batch([
+    d1.prepare("UPDATE memo_sections SET content = ?, current_version_id = ?, updated_at = ? WHERE id = ? AND plan_id = ?")
+      .bind(generated.summary, versionId, now, section.id, planId),
+    d1.prepare("INSERT INTO headcount_summary_snapshots (id, plan_id, section_id, section_version_id, generated_at, generated_by_email, generated_by_name, summary, request_count, total_positions, request_snapshot) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+      .bind(snapshotId, planId, section.id, versionId, now, actor.email, actor.displayName || displayNameFromEmail(actor.email), generated.summary, generated.requestCount, generated.totalPositions, JSON.stringify(snapshotRequests)),
+  ]);
+  await recordActivity(d1, planId, actor, "headcount_summary", snapshotId, "headcount_summary.replaced", null, { sectionId: section.id, versionId, requestCount: generated.requestCount, completion });
+}
+
 export async function createInvestmentRequest(input: Partial<InvestmentRequest>, actor: Actor) {
   assertCan(actor, "investment_write");
   const planId = resolvePlanId(input.planId);
@@ -772,8 +860,8 @@ export async function createInvestmentRequest(input: Partial<InvestmentRequest>,
   const now = Date.now();
   const requestId = crypto.randomUUID();
   const lineId = crypto.randomUUID();
-  const initialLine = sanitizeInvestmentLine({ ...emptyInvestmentRequestLine, id: lineId, lineType: requestType }, requestType, planId);
   const request = sanitizeInvestmentRequest(input, requestType, actor, now, null);
+  const initialLine = sanitizeInvestmentLine({ ...emptyInvestmentRequestLine, id: lineId, lineType: requestType }, requestType, planId, request.initiative);
 
   const d1 = getD1();
   await ensureSchema(d1);
@@ -781,7 +869,7 @@ export async function createInvestmentRequest(input: Partial<InvestmentRequest>,
   await d1.batch([
     d1
       .prepare(
-        "INSERT INTO investment_requests (id, plan_id, request_type, status, owner_name, owner_email, initiative, strategic_objective, milestone, alternatives, measurable_outcome, not_approved_impact, created_by, created_at, updated_at, submitted_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO investment_requests (id, plan_id, request_type, status, owner_name, owner_email, initiative, strategic_objective, milestone, alternatives, measurable_outcome, not_approved_impact, quantity, created_by, created_at, updated_at, submitted_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
       )
       .bind(
         requestId,
@@ -796,6 +884,7 @@ export async function createInvestmentRequest(input: Partial<InvestmentRequest>,
         request.alternatives,
         request.measurableOutcome,
         request.notApprovedImpact,
+        request.quantity,
         actor.email,
         now,
         now,
@@ -816,7 +905,7 @@ export async function createInvestmentRequest(input: Partial<InvestmentRequest>,
 
 export async function updateInvestmentRequest(
   id: string,
-  input: Partial<InvestmentRequest> & { submit?: boolean },
+  input: Partial<InvestmentRequest> & { submit?: boolean; archived?: boolean; expectedUpdatedAt?: number },
   actor: Actor,
 ) {
   assertCan(actor, "investment_write");
@@ -829,12 +918,26 @@ export async function updateInvestmentRequest(
   if (!current) {
     throw new Error("Investment request not found.");
   }
+  if (input.expectedUpdatedAt != null && input.expectedUpdatedAt !== current.updatedAt) {
+    throw new Error("This request changed elsewhere. Reload it before saving so no edits are overwritten.");
+  }
+
+  if (typeof input.archived === "boolean") {
+    if (current.requestType !== "Payroll / Headcount") throw new Error("Only Headcount requests can be archived.");
+    const now = Date.now();
+    const archivedAt = input.archived ? now : null;
+    await d1.prepare("UPDATE investment_requests SET archived_at = ?, updated_at = ? WHERE id = ? AND plan_id = ?")
+      .bind(archivedAt, now, id, planId)
+      .run();
+    await recordActivity(d1, planId, actor, "investment_request", id, input.archived ? "investment_request.archived" : "investment_request.restored", current, { archivedAt });
+    return getInvestmentRequest(id, planId);
+  }
 
   const requestType = normalize(input.requestType, allowedInvestmentRequestTypes, current.requestType);
   const status = input.submit ? "Submitted" : normalize(input.status, allowedInvestmentRequestStatuses, current.status);
   const now = Date.now();
   const next = sanitizeInvestmentRequest({ ...current, ...input, status }, requestType, actor, now, input.submit ? now : current.submittedAt);
-  const lines = normalizeInvestmentLines(input.lines?.length ? input.lines : current.lines, requestType, planId);
+  const lines = normalizeInvestmentLines(input.lines?.length ? input.lines : current.lines, requestType, planId, next.initiative);
 
   if (input.submit) {
     const errors = validateInvestmentRequest({ ...next, id, planId, requestType, status, createdAt: current.createdAt, lines });
@@ -846,7 +949,7 @@ export async function updateInvestmentRequest(
   await d1.batch([
     d1
       .prepare(
-        "UPDATE investment_requests SET request_type = ?, status = ?, owner_name = ?, owner_email = ?, initiative = ?, strategic_objective = ?, milestone = ?, alternatives = ?, measurable_outcome = ?, not_approved_impact = ?, updated_at = ?, submitted_at = ? WHERE id = ? AND plan_id = ?",
+        "UPDATE investment_requests SET request_type = ?, status = ?, owner_name = ?, owner_email = ?, initiative = ?, strategic_objective = ?, milestone = ?, alternatives = ?, measurable_outcome = ?, not_approved_impact = ?, quantity = ?, updated_at = ?, submitted_at = ? WHERE id = ? AND plan_id = ?",
       )
       .bind(
         requestType,
@@ -859,6 +962,7 @@ export async function updateInvestmentRequest(
         next.alternatives,
         next.measurableOutcome,
         next.notApprovedImpact,
+        next.quantity,
         now,
         input.submit ? now : current.submittedAt,
         id,
@@ -948,7 +1052,7 @@ export async function getInvestmentRequest(id: string, planId: string) {
   const d1 = getD1();
   const request = await d1
     .prepare(
-      "SELECT id, plan_id, request_type, status, owner_name, owner_email, initiative, strategic_objective, milestone, alternatives, measurable_outcome, not_approved_impact, created_at, updated_at, submitted_at FROM investment_requests WHERE id = ? AND plan_id = ?",
+      "SELECT id, plan_id, request_type, status, owner_name, owner_email, initiative, strategic_objective, milestone, alternatives, measurable_outcome, not_approved_impact, quantity, created_at, updated_at, submitted_at, archived_at FROM investment_requests WHERE id = ? AND plan_id = ?",
     )
     .bind(id, planId)
     .first<InvestmentRequestRow>();
@@ -980,22 +1084,23 @@ function sanitizeInvestmentRequest(
     alternatives: input.alternatives?.trim() ?? "",
     measurableOutcome: input.measurableOutcome?.trim() ?? "",
     notApprovedImpact: input.notApprovedImpact?.trim() ?? "",
+    quantity: Number.isInteger(input.quantity) && Number(input.quantity) > 0 ? Number(input.quantity) : 1,
     updatedAt,
     submittedAt,
   };
 }
 
-function normalizeInvestmentLines(lines: InvestmentRequestLine[], requestType: InvestmentRequestType, planId: string) {
+function normalizeInvestmentLines(lines: InvestmentRequestLine[], requestType: InvestmentRequestType, planId: string, initiative = "") {
   const normalized = lines
     .filter((line) => line.lineType === requestType)
-    .map((line) => sanitizeInvestmentLine(line, requestType, planId));
+    .map((line) => sanitizeInvestmentLine(line, requestType, planId, initiative));
   if (normalized.length > 0) {
     return normalized;
   }
-  return [sanitizeInvestmentLine({ ...emptyInvestmentRequestLine, id: crypto.randomUUID(), lineType: requestType }, requestType, planId)];
+  return [sanitizeInvestmentLine({ ...emptyInvestmentRequestLine, id: crypto.randomUUID(), lineType: requestType }, requestType, planId, initiative)];
 }
 
-function sanitizeInvestmentLine(line: Partial<InvestmentRequestLine>, requestType: InvestmentRequestType, planId: string): InvestmentRequestLine {
+function sanitizeInvestmentLine(line: Partial<InvestmentRequestLine>, requestType: InvestmentRequestType, planId: string, initiative = ""): InvestmentRequestLine {
   const profile = investmentWorkbookProfiles[planId];
   if (!profile) {
     throw new Error("No G&A investment workbook is configured for this business plan.");
@@ -1006,7 +1111,7 @@ function sanitizeInvestmentLine(line: Partial<InvestmentRequestLine>, requestTyp
     ...emptyInvestmentRequestLine,
     id: line.id || crypto.randomUUID(),
     lineType: requestType,
-    jobTitle: line.jobTitle?.trim() ?? "",
+    jobTitle: requestType === "Payroll / Headcount" ? initiative.trim() : line.jobTitle?.trim() ?? "",
     group: profile.groups.length && profile.groups.includes(group) ? group : "",
     roleHire: line.roleHire?.trim() ?? "",
     location: line.location?.trim() ?? "",
@@ -1031,6 +1136,9 @@ function validateInvestmentRequest(request: InvestmentRequest) {
   if (!request.alternatives.trim()) errors.push("Alternatives considered are required.");
   if (!request.measurableOutcome.trim()) errors.push("Measurable outcome is required.");
   if (!request.notApprovedImpact.trim()) errors.push("Impact if not approved is required.");
+  if (request.requestType === "Payroll / Headcount" && (!Number.isInteger(request.quantity) || request.quantity < 1)) {
+    errors.push("Requested positions must be one or greater.");
+  }
   if (request.lines.length === 0) errors.push("At least one request line is required.");
 
   for (const [index, line] of request.lines.entries()) {
@@ -1107,8 +1215,9 @@ async function ensureSchema(d1: D1Database) {
     "CREATE TABLE IF NOT EXISTS user_profiles (email text PRIMARY KEY NOT NULL, display_name text, role text DEFAULT 'General Reader' NOT NULL, created_at integer NOT NULL, updated_at integer NOT NULL)",
     "CREATE TABLE IF NOT EXISTS collaborative_groups (id text PRIMARY KEY NOT NULL, plan_id text NOT NULL, group_type text NOT NULL, name text NOT NULL, description text DEFAULT '' NOT NULL, created_by text NOT NULL, created_at integer NOT NULL, updated_at integer NOT NULL, FOREIGN KEY (plan_id) REFERENCES business_plans(id) ON DELETE cascade)",
     "CREATE TABLE IF NOT EXISTS activity_events (id text PRIMARY KEY NOT NULL, plan_id text NOT NULL, actor_email text NOT NULL, actor_role text NOT NULL, object_type text NOT NULL, object_id text NOT NULL, action text NOT NULL, old_value text, new_value text, created_at integer NOT NULL, FOREIGN KEY (plan_id) REFERENCES business_plans(id) ON DELETE cascade)",
-    "CREATE TABLE IF NOT EXISTS investment_requests (id text PRIMARY KEY NOT NULL, plan_id text NOT NULL, request_type text NOT NULL, status text DEFAULT 'Draft' NOT NULL, owner_name text DEFAULT '' NOT NULL, owner_email text DEFAULT '' NOT NULL, initiative text DEFAULT '' NOT NULL, strategic_objective text DEFAULT '' NOT NULL, milestone text DEFAULT '' NOT NULL, alternatives text DEFAULT '' NOT NULL, measurable_outcome text DEFAULT '' NOT NULL, not_approved_impact text DEFAULT '' NOT NULL, created_by text NOT NULL, created_at integer NOT NULL, updated_at integer NOT NULL, submitted_at integer, FOREIGN KEY (plan_id) REFERENCES business_plans(id) ON DELETE cascade)",
+    "CREATE TABLE IF NOT EXISTS investment_requests (id text PRIMARY KEY NOT NULL, plan_id text NOT NULL, request_type text NOT NULL, status text DEFAULT 'Draft' NOT NULL, owner_name text DEFAULT '' NOT NULL, owner_email text DEFAULT '' NOT NULL, initiative text DEFAULT '' NOT NULL, strategic_objective text DEFAULT '' NOT NULL, milestone text DEFAULT '' NOT NULL, alternatives text DEFAULT '' NOT NULL, measurable_outcome text DEFAULT '' NOT NULL, not_approved_impact text DEFAULT '' NOT NULL, quantity integer DEFAULT 1 NOT NULL, created_by text NOT NULL, created_at integer NOT NULL, updated_at integer NOT NULL, submitted_at integer, archived_at integer, FOREIGN KEY (plan_id) REFERENCES business_plans(id) ON DELETE cascade)",
     "CREATE TABLE IF NOT EXISTS investment_request_lines (id text PRIMARY KEY NOT NULL, request_id text NOT NULL, line_type text NOT NULL, position integer NOT NULL, line_data text NOT NULL, created_at integer NOT NULL, updated_at integer NOT NULL, FOREIGN KEY (request_id) REFERENCES investment_requests(id) ON DELETE cascade)",
+    "CREATE TABLE IF NOT EXISTS headcount_summary_snapshots (id text PRIMARY KEY NOT NULL, plan_id text NOT NULL, section_id text NOT NULL, section_version_id text NOT NULL, generated_at integer NOT NULL, generated_by_email text NOT NULL, generated_by_name text NOT NULL, summary text NOT NULL, request_count integer NOT NULL, total_positions integer NOT NULL, request_snapshot text NOT NULL, FOREIGN KEY (plan_id) REFERENCES business_plans(id) ON DELETE cascade, FOREIGN KEY (section_id) REFERENCES memo_sections(id) ON DELETE cascade, FOREIGN KEY (section_version_id) REFERENCES memo_section_versions(id) ON DELETE cascade)",
     "CREATE TABLE IF NOT EXISTS app_meta (key text PRIMARY KEY NOT NULL, value text NOT NULL, updated_at integer NOT NULL)",
   ];
 
@@ -1124,6 +1233,8 @@ async function ensureSchema(d1: D1Database) {
 
   await addColumnIfMissing(d1, "business_plans", "approval_state", "text DEFAULT 'Draft' NOT NULL");
   await addColumnIfMissing(d1, "business_plans", "approval_posture", "text DEFAULT 'Drafting' NOT NULL");
+  await addColumnIfMissing(d1, "investment_requests", "quantity", "integer DEFAULT 1 NOT NULL");
+  await addColumnIfMissing(d1, "investment_requests", "archived_at", "integer");
   await addColumnIfMissing(d1, "business_plans", "created_by", "text");
   await addColumnIfMissing(d1, "memo_sections", "section_key", "text");
   await addColumnIfMissing(d1, "memo_sections", "requirement", "text DEFAULT '' NOT NULL");
@@ -1343,9 +1454,65 @@ function toSectionVersion(row: SectionVersionRow): MemoSectionVersion {
     createdAt: row.created_at,
     createdByEmail: row.created_by_email,
     createdByName: row.created_by_name,
-    actionType: row.action_type === "restore" ? "restore" : "edit",
+    actionType: row.action_type === "restore" ? "restore" : row.action_type === "headcount_summary" ? "headcount_summary" : "edit",
     sourceVersionId: row.source_version_id,
     note: row.note ?? "",
+  };
+}
+
+async function getHeadcountSummarySnapshot(
+  d1: D1Database,
+  planId: string,
+  sectionId: string,
+): Promise<HeadcountSummaryState> {
+  const row = await d1
+    .prepare("SELECT id, section_id, section_version_id, generated_at, generated_by_email, generated_by_name, summary, request_count, total_positions, request_snapshot FROM headcount_summary_snapshots WHERE plan_id = ? AND section_id = ? ORDER BY generated_at DESC LIMIT 1")
+    .bind(planId, sectionId)
+    .first<HeadcountSummarySnapshotRow>();
+  if (!row) return { snapshot: null, isOutdated: false, changedRequests: [] };
+  const section = await d1
+    .prepare("SELECT current_version_id FROM memo_sections WHERE id = ? AND plan_id = ?")
+    .bind(sectionId, planId)
+    .first<{ current_version_id: string | null }>();
+  let requests: HeadcountSummarySnapshot["requests"] = [];
+  try {
+    requests = JSON.parse(row.request_snapshot) as HeadcountSummarySnapshot["requests"];
+  } catch {
+    requests = [];
+  }
+  const current = (await getInvestmentRequests(planId)).filter((request) => request.requestType === "Payroll / Headcount");
+  const snapshotById = new Map(requests.map((request) => [request.id, request]));
+  const currentById = new Map(current.map((request) => [request.id, request]));
+  const changedRequests: HeadcountSummaryState["changedRequests"] = [];
+  for (const request of current) {
+    const previous = snapshotById.get(request.id);
+    if (!previous && request.archivedAt == null) changedRequests.push({ title: request.initiative || "Untitled request", detail: "New active request added" });
+    else if (previous && request.archivedAt != null) changedRequests.push({ title: request.initiative || "Untitled request", detail: "Request archived" });
+    else if (previous.fingerprint !== headcountRequestFingerprint(request)) {
+      changedRequests.push({ title: request.initiative || "Untitled request", detail: validateHeadcountRequest(request).complete ? "Request edited" : "Request became incomplete" });
+    }
+  }
+  for (const previous of requests) {
+    if (!currentById.has(previous.id)) changedRequests.push({ title: previous.title || "Untitled request", detail: "Request removed" });
+  }
+  if (section?.current_version_id !== row.section_version_id) {
+    changedRequests.push({ title: "Headcount Needs", detail: "Draft was restored from version history" });
+  }
+  return {
+    snapshot: {
+      id: row.id,
+      sectionId: row.section_id,
+      sectionVersionId: row.section_version_id,
+      generatedAt: row.generated_at,
+      generatedByEmail: row.generated_by_email,
+      generatedByName: row.generated_by_name,
+      summary: row.summary,
+      requestCount: row.request_count,
+      totalPositions: row.total_positions,
+      requests,
+    },
+    isOutdated: changedRequests.length > 0,
+    changedRequests,
   };
 }
 
@@ -1363,9 +1530,11 @@ function toInvestmentRequest(row: InvestmentRequestRow, lineRows: InvestmentRequ
     alternatives: row.alternatives,
     measurableOutcome: row.measurable_outcome,
     notApprovedImpact: row.not_approved_impact,
+    quantity: Math.max(1, row.quantity ?? 1),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     submittedAt: row.submitted_at,
+    archivedAt: row.archived_at,
     lines: lineRows.map((line) => parseInvestmentLine(line)).filter((line) => line.lineType === row.request_type),
   };
 }
@@ -1392,7 +1561,7 @@ async function createSectionVersion(
     sectionId: string;
     content: string;
     actor: Actor;
-    actionType: "edit" | "restore";
+    actionType: "edit" | "restore" | "headcount_summary";
     sourceVersionId: string | null;
     note: string;
     now: number;

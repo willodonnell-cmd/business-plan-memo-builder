@@ -54,9 +54,11 @@ export type InvestmentRequest = {
   alternatives: string;
   measurableOutcome: string;
   notApprovedImpact: string;
+  quantity: number;
   createdAt: number;
   updatedAt: number;
   submittedAt: number | null;
+  archivedAt: number | null;
   lines: InvestmentRequestLine[];
 };
 
@@ -90,9 +92,28 @@ export type MemoSectionVersion = {
   createdAt: number;
   createdByEmail: string;
   createdByName: string;
-  actionType: "edit" | "restore";
+  actionType: "edit" | "restore" | "headcount_summary";
   sourceVersionId: string | null;
   note: string;
+};
+
+export type HeadcountSummarySnapshot = {
+  id: string;
+  sectionId: string;
+  sectionVersionId: string;
+  generatedAt: number;
+  generatedByName: string;
+  generatedByEmail: string;
+  summary: string;
+  requestCount: number;
+  totalPositions: number;
+  requests: Array<{ id: string; title: string; quantity: number; fingerprint: string; active: boolean }>;
+};
+
+export type HeadcountSummaryState = {
+  snapshot: HeadcountSummarySnapshot | null;
+  isOutdated: boolean;
+  changedRequests: Array<{ title: string; detail: string }>;
 };
 
 export type Question = {
@@ -152,6 +173,7 @@ export type WorkspacePlan = {
   approvers: Approver[];
   groups: CollaborativeGroup[];
   activity: ActivityEvent[];
+  headcountSummary?: HeadcountSummaryState;
 };
 
 export const PLAN_ID = "2027-business-plan";
@@ -315,8 +337,8 @@ export const investmentExpenseTypes = [
 export const investmentWorkbookProfiles: Record<string, InvestmentWorkbookProfile> = {
   [PLAN_ID]: {
     planId: PLAN_ID,
-    workbookName: "G&A 2027 Plan - Essentials - Final.xlsx",
-    templatePath: "/templates/G&A%202027%20Plan%20-%20Essentials%20Operations%20-%20Final.xlsx",
+    workbookName: "G&A 2027 Plan - Essentials Operations - 3YR BP Memo.xlsx",
+    templatePath: "/templates/G&A%202027%20Plan%20-%20Essentials%20Operations%20-%203YR%20BP%20Memo.xlsx",
     businessUnit: "Essentials",
     payrollInputRange: "Investment Case Asks - Monthly!A5:H20 and BB5:BB20",
     nonPayrollInputRange: "Investment Case Asks - Monthly!A28:D42 and AR28:AR42",
@@ -325,8 +347,8 @@ export const investmentWorkbookProfiles: Record<string, InvestmentWorkbookProfil
   },
   "2027-prologis-energy-solutions-business-plan": {
     planId: "2027-prologis-energy-solutions-business-plan",
-    workbookName: "G&A 2027 Plan - Energy Solutions - Final.xlsx",
-    templatePath: "/templates/G&A%202027%20Plan%20-%20Energy%20Solutions%20-%20Final.xlsx",
+    workbookName: "G&A 2027 Plan - Energy Solutions - 3YR BP Memo.xlsx",
+    templatePath: "/templates/G&A%202027%20Plan%20-%20Energy%20Solutions%20-%203YR%20BP%20Memo.xlsx",
     businessUnit: "Energy Solutions",
     payrollInputRange: "Investment Case Asks - Monthly!A5:I20 and BC5:BC20",
     nonPayrollInputRange: "Investment Case Asks - Monthly!A28:E42 and AS28:AS42",
@@ -335,8 +357,8 @@ export const investmentWorkbookProfiles: Record<string, InvestmentWorkbookProfil
   },
   "2027-data-center-business-plan": {
     planId: "2027-data-center-business-plan",
-    workbookName: "G&A 2027 Plan - Data Centers - Final.xlsx",
-    templatePath: "/templates/G&A%202027%20Plan%20-%20Data%20Centers%20-%20Final.xlsx",
+    workbookName: "G&A 2027 Plan - Data Centers - 3YR BP Memo.xlsx",
+    templatePath: "/templates/G&A%202027%20Plan%20-%20Data%20Centers%20-%203YR%20BP%20Memo.xlsx",
     businessUnit: "Data Centers",
     payrollInputRange: "Investment Case Asks - Monthly!A5:H20 and BB5:BB20",
     nonPayrollInputRange: "Investment Case Asks - Monthly!A28:D42 and AR28:AR42",
@@ -345,8 +367,8 @@ export const investmentWorkbookProfiles: Record<string, InvestmentWorkbookProfil
   },
   "2027-strategic-capital-business-plan": {
     planId: "2027-strategic-capital-business-plan",
-    workbookName: "G&A 2027 Plan - Strategic Capital - Final.xlsx",
-    templatePath: "/templates/G&A%202027%20Plan%20-%20Strategic%20Capital%20-%20Final.xlsx",
+    workbookName: "G&A 2027 Plan - Strategic Capital - 3YR BP Memo.xlsx",
+    templatePath: "/templates/G&A%202027%20Plan%20-%20Strategic%20Capital%20-%203YR%20BP%20Memo.xlsx",
     businessUnit: "Strategic Capital",
     payrollInputRange: "Investment Case Asks - Monthly!A5:I20 and BC5:BC20",
     nonPayrollInputRange: "Investment Case Asks - Monthly!A28:E42 and AS28:AS42",

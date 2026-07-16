@@ -6,7 +6,53 @@ type WorkbookBuildResult = {
   fileName: string;
 };
 
+type PayrollExportLine = InvestmentRequest["lines"][number];
+
 const monthlySheetName = "Investment Case Asks - Monthly";
+const payrollRows = Array.from({ length: 16 }, (_, index) => index + 5);
+
+export function buildPayrollHeadcountWorkbook(
+  templateBytes: Uint8Array,
+  lines: PayrollExportLine[],
+  profile: InvestmentWorkbookProfile,
+): WorkbookBuildResult {
+  const orderedLines = [...lines]
+    .filter((line) => line.lineType === "Payroll / Headcount")
+    .sort((left, right) => [left.group, left.hireDate, left.jobTitle].join("\u0000").localeCompare([right.group, right.hireDate, right.jobTitle].join("\u0000")));
+  if (orderedLines.length > payrollRows.length) {
+    const overflow = orderedLines.slice(payrollRows.length).map((line) => line.jobTitle || "Untitled role").join(", ");
+    throw new Error(`This workbook has space for ${payrollRows.length} headcount requests, but the plan contains ${orderedLines.length}. Contact the Finance template owners before changing the workbook structure. Roles that do not fit: ${overflow}.`);
+  }
+  if (profile.groups.length && orderedLines.some((line) => !line.group)) {
+    throw new Error("The following roles are missing required workbook information: Group.");
+  }
+  const zip = unzipSync(templateBytes);
+  const sheetPath = resolveWorksheetPath(zip, monthlySheetName);
+  const sheetBytes = zip[sheetPath];
+  if (!sheetBytes) throw new Error(`Could not find ${monthlySheetName} in workbook template.`);
+  let sheetXml = strFromU8(sheetBytes);
+  const sharedStrings = parseSharedStrings(zip["xl/sharedStrings.xml"] ? strFromU8(zip["xl/sharedStrings.xml"]) : "");
+  const columns = profile.groups.length
+    ? { title: "A", group: "B", roleHire: "D", location: "E", responsibilities: "F", hireDate: "G", rationale: "BC" }
+    : { title: "A", roleHire: "C", location: "D", responsibilities: "E", hireDate: "F", rationale: "BB" };
+  verifyPayrollHeaders(sheetXml, sharedStrings, profile.groups.length);
+  orderedLines.forEach((line, index) => {
+    const row = payrollRows[index];
+    const cells: Record<string, string | number | null> = {
+      [columns.title]: line.jobTitle,
+      [columns.roleHire]: line.roleHire,
+      [columns.location]: line.location,
+      [columns.responsibilities]: line.responsibilities,
+      [columns.hireDate]: dateToExcelSerial(line.hireDate),
+      [columns.rationale]: line.notesRationale,
+      ...("group" in columns ? { [columns.group]: line.group } : {}),
+    };
+    for (const column of Object.keys(cells)) assertSafePayrollCell(sheetXml, `${column}${row}`);
+    sheetXml = setCells(sheetXml, row, cells);
+  });
+  zip[sheetPath] = strToU8(sheetXml);
+  return { bytes: zipSync(zip), fileName: `2027_Headcount_Export_${sanitizeFilePart(profile.businessUnit)}_${new Date().toISOString().slice(0, 10)}.xlsx` };
+}
 
 export function buildInvestmentRequestWorkbook(
   templateBytes: Uint8Array,
@@ -133,6 +179,36 @@ function setCell(sheetXml: string, ref: string, value: string | number | null) {
   const openTag = (match.match(/^<c\b([^>]*)/)?.[1] ?? ` r="${ref}"`).replace(/\/\s*$/, "");
   const attrsWithoutType = openTag.replace(/\s+t="[^"]*"/g, "");
   return sheetXml.replace(pattern, buildCellXml(attrsWithoutType, value));
+}
+
+function verifyPayrollHeaders(sheetXml: string, sharedStrings: string[], hasGroups: boolean) {
+  const headers = hasGroups
+    ? { A4: "Job Title", B4: "Group", C4: "Job Level", D4: "Role / Hire", E4: "Location (City/Country)", F4: "Key Job Responsibilities", G4: "Hire Date", BC4: "Notes / Rationale" }
+    : { A4: "Job Title", B4: "Job Level", C4: "Role / Hire", D4: "Location (City/Country)", E4: "Key Job Responsibilities", F4: "Hire Date", BB4: "Notes / Rationale" };
+  for (const [ref, label] of Object.entries(headers)) {
+    if (readCellText(sheetXml, ref, sharedStrings) !== label) throw new Error(`An approved input cell could not be located without modifying the workbook: expected ${label}.`);
+  }
+}
+
+function assertSafePayrollCell(sheetXml: string, ref: string) {
+  const cell = sheetXml.match(cellPattern(ref))?.[0];
+  if (cell?.includes("<f")) throw new Error(`An approved input cell could not be located without modifying the workbook: ${ref} contains a formula.`);
+  if (cell && /<v>|<is>/.test(cell)) throw new Error(`An approved input cell could not be located without modifying the workbook: ${ref} already contains data.`);
+}
+
+function readCellText(sheetXml: string, ref: string, sharedStrings: string[]) {
+  const cell = sheetXml.match(cellPattern(ref))?.[0] ?? "";
+  const direct = cell.match(/<t[^>]*>([\s\S]*?)<\/t>/)?.[1];
+  const sharedIndex = cell.match(/<v>(\d+)<\/v>/)?.[1];
+  return (direct ?? (sharedIndex ? sharedStrings[Number(sharedIndex)] : "") ?? "").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">");
+}
+
+function parseSharedStrings(xml: string) {
+  return [...xml.matchAll(/<si>([\s\S]*?)<\/si>/g)].map((match) => [...match[1].matchAll(/<t[^>]*>([\s\S]*?)<\/t>/g)].map((part) => part[1]).join(""));
+}
+
+function sanitizeFilePart(value: string) {
+  return value.replace(/[^a-z0-9]+/gi, "_").replace(/^_+|_+$/g, "") || "Business_Plan";
 }
 
 function insertCell(sheetXml: string, ref: string, value: string | number | null) {

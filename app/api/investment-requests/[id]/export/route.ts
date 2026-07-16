@@ -1,11 +1,12 @@
 import {
   getActorFromRequest,
   getInvestmentRequest,
+  getInvestmentRequests,
   getInvestmentRequestExport,
   resolvePlanId,
   toRouteErrorMessage,
 } from "../../../../../lib/workspace-store";
-import { buildInvestmentRequestWorkbook } from "../../../../../lib/investment-workbook-export";
+import { buildInvestmentRequestWorkbook, buildPayrollHeadcountWorkbook } from "../../../../../lib/investment-workbook-export";
 import { investmentWorkbookProfiles } from "../../../../../lib/workspace-defaults";
 
 export async function GET(
@@ -31,7 +32,9 @@ export async function GET(
         throw new Error(`Workbook template could not be loaded: ${profile.workbookName}.`);
       }
       const templateBytes = new Uint8Array(await templateResponse.arrayBuffer());
-      const workbook = buildInvestmentRequestWorkbook(templateBytes, investmentRequest, profile);
+      const workbook = investmentRequest.requestType === "Payroll / Headcount"
+        ? buildPayrollHeadcountWorkbook(templateBytes, (await getInvestmentRequests(planId)).flatMap((item) => item.lines), profile)
+        : buildInvestmentRequestWorkbook(templateBytes, investmentRequest, profile);
       const body = new ArrayBuffer(workbook.bytes.byteLength);
       new Uint8Array(body).set(workbook.bytes);
       return new Response(body, {

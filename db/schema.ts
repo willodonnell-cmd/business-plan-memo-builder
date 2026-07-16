@@ -146,6 +146,7 @@ export const investmentRequests = sqliteTable("investment_requests", {
   createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
   updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
   submittedAt: integer("submitted_at", { mode: "timestamp_ms" }),
+  archivedAt: integer("archived_at", { mode: "timestamp_ms" }),
 });
 
 export const investmentRequestLines = sqliteTable("investment_request_lines", {
